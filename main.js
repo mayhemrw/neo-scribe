@@ -38,7 +38,9 @@ if (process.platform === 'linux') app.commandLine.appendSwitch('enable-speech-di
 // ---------------------------------------------------------------------------
 // Resolved properly at startup via app.getPath('documents') — this default
 // covers any early access and non-redirected setups.
-let LIBRARY_DIR = path.join(os.homedir(), 'Documents', 'NEO Library');
+// NEO Scribe's own default folder, so it never shares books with Hugh's NEO
+const LIBRARY_NAME = 'NEO Scribe Library';
+let LIBRARY_DIR = path.join(os.homedir(), 'Documents', LIBRARY_NAME);
 let LIBRARY_FILE = path.join(LIBRARY_DIR, 'library.json');
 
 // NEO's few app-level settings (today: a custom library folder) live in the
@@ -160,7 +162,7 @@ ipcMain.handle('i18n:reload', (e) => {
 // The library is plain files, so the writer moves them; NEO only follows.
 async function chooseLibraryFolder() {
   const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-  const defaultDir = path.join(app.getPath('documents'), 'NEO Library');
+  const defaultDir = path.join(app.getPath('documents'), LIBRARY_NAME);
   const custom = LIBRARY_DIR !== defaultDir;
   const ask = await dialog.showMessageBox(win, {
     type: 'question',
@@ -230,9 +232,9 @@ function fallbackLibraryDir() {
   const spots = [];
   try {
     const docs = path.join(home, 'Documents');
-    if (fs.statSync(docs).isDirectory()) spots.push(path.join(docs, 'NEO Library'));
+    if (fs.statSync(docs).isDirectory()) spots.push(path.join(docs, LIBRARY_NAME));
   } catch { /* no plain Documents folder here */ }
-  spots.push(path.join(home, 'NEO Library'));
+  spots.push(path.join(home, LIBRARY_NAME));
   return spots.find((dir) => dir !== LIBRARY_DIR && folderWritable(dir)) || null;
 }
 function useLibraryDir(dir) {
@@ -250,7 +252,7 @@ function useLibraryDir(dir) {
 // with the default folder for this session only; the choice stays saved.
 function isDir(dir) { try { return fs.statSync(dir).isDirectory(); } catch { return false; } }
 function awaitChosenLibrary(chosen) {
-  const fallback = path.join(app.getPath('documents'), 'NEO Library');
+  const fallback = path.join(app.getPath('documents'), LIBRARY_NAME);
   while (!isDir(chosen)) {
     const r = dialog.showMessageBoxSync({
       type: 'warning',
@@ -3013,7 +3015,7 @@ function buildMenu() {
     ...(isMac ? [{
       role: 'appMenu',
       submenu: [
-        { role: 'about', label: t('About NEO') },
+        { role: 'about', label: t('About NEO Scribe') },
         { type: 'separator' },
         { role: 'services', label: t('Services') },
         { type: 'separator' },
@@ -3383,7 +3385,7 @@ function buildMenu() {
         { label: t('FAQ…'), click: () => sendToWindow({ type: 'guide', name: 'faq' }) },
         { type: 'separator' },
         {
-          label: t('About NEO'),
+          label: t('About NEO Scribe'),
           click: () => sendToWindow({ type: 'about' })
         },
         {
@@ -3730,7 +3732,7 @@ app.whenReady().then(() => {
     if (process.platform === 'darwin' && fs.existsSync(devIcon)) {
       if (app.dock) app.dock.setIcon(devIcon);
       app.setAboutPanelOptions({
-        applicationName: 'NEO',
+        applicationName: 'NEO Scribe',
         applicationVersion: app.getVersion(),
         iconPath: devIcon
       });
@@ -3742,7 +3744,7 @@ app.whenReady().then(() => {
   try {
     // the real Documents folder (handles OneDrive-redirected Windows setups)
     try {
-      LIBRARY_DIR = path.join(app.getPath('documents'), 'NEO Library');
+      LIBRARY_DIR = path.join(app.getPath('documents'), LIBRARY_NAME);
       // …unless the writer chose their own folder (File → Library Folder…)
       const chosen = readSettings().libraryDir;
       if (chosen) LIBRARY_DIR = awaitChosenLibrary(chosen);

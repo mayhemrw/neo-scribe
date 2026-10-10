@@ -1959,7 +1959,7 @@ function bookTile(meta, opts = {}) {
       if (coverItems.length) options.push({ label: t('Cover'), desc: t('A new cover, your own art, or a saved image.'), value: 'coverMenu' });
       options.push(
         { label: t('Set word goal…'), desc: t('Adds the subtle progress bar to the cover.'), value: 'goal' },
-        { label: t('Remove from bookshelf'), desc: t('Takes it off your shelves. The files stay safe in your NEO Library folder on disk.'), value: 'remove' },
+        { label: t('Remove from bookshelf'), desc: t('Takes it off your shelves. The files stay safe in your NEO Scribe Library folder on disk.'), value: 'remove' },
         { label: trashLabel, desc: window.Capacitor ? t('Moves the book folder to Deleted Books in your NEO Library, where you can recover it.') : t('Sends the book folder to your system trash, where you can recover it.'), danger: true, value: 'trash' }
       );
       choice = await optionModal(t('“{title}”', { title: escHtml(shownTitle(meta.title)) }), null, options);
@@ -2036,7 +2036,7 @@ function bookTile(meta, opts = {}) {
       for (const s of library.shelves) s.bookIds = s.bookIds.filter((b) => b !== meta.id);
       await writeLibrary(library);
       renderShelves();
-      toast(t('“{title}” removed from the shelves — its files are still in your NEO Library', { title: shownTitle(meta.title) }));
+      toast(t('“{title}” removed from the shelves — its files are still in your NEO Scribe Library', { title: shownTitle(meta.title) }));
     } else if (choice === 'trash') {
       const ok = await window.neo.deleteBook(meta.id, meta.title);
       if (ok) {
@@ -19798,6 +19798,7 @@ async function showAbout() {
   bd.innerHTML = `
     <div class="modal" style="width:340px;text-align:center">
       <h2 style="font-size:22px;letter-spacing:6px">NEO</h2>
+      <p class="brand-sub">Scribe</p>
       <p class="about-version">${t('Version {version}', { version: v })}</p>
       <p class="about-line">${t('A word processor for authors.')}</p>
       <div style="margin-top:16px">

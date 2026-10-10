@@ -64,7 +64,7 @@ jobs:
           Start-Sleep -Seconds 25
           $proc = Get-Process | Where-Object { $_.ProcessName -like "*NEO*" }
           if (-not $proc) { Write-Error "NEO process not running after launch"; exit 1 }
-          if (-not (Test-Path "$env:USERPROFILE\Documents\NEO Library\library.json")) {
+          if (-not (Test-Path "$env:USERPROFILE\Documents\NEO Scribe Library\library.json")) {
             Write-Error "NEO ran but never created its library — startup is broken"
             exit 1
           }

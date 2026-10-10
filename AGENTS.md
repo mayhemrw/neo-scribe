@@ -198,7 +198,7 @@ Pocket makes PDFs through `NeoPdf`, a native plugin in each project: Android ope
 ## Processes
 
 ```
-index.html + app.js  →  preload.js (window.neo)  →  main.js  →  NEO Library
+index.html + app.js  →  preload.js (window.neo)  →  main.js  →  NEO Scribe Library
                                                       ↓
                                                spell-worker.js
 ```
@@ -207,10 +207,10 @@ The window is created with `contextIsolation: true` and `nodeIntegration: false`
 
 ## Files on disk
 
-Default library: `~/Documents/NEO Library` (`app.getPath('documents')`). **File → Library Folder…** stores another path in `userData/settings.json` and restarts. NEO does not move existing books.
+Default library: `~/Documents/NEO Scribe Library` (`app.getPath('documents')`, `LIBRARY_NAME` in `main.js`). NEO Scribe is its own app beside Hugh's NEO: its own appId (`com.mayhemrw.neoscribe`), name (so its own `userData` and device id) and library folder, so the two never share books, settings or a Scribe's Log device. Inside the app it's still called NEO; only the window title, the shelf, About and the welcome say NEO Scribe. **File → Library Folder…** stores another path in `userData/settings.json` and restarts. NEO does not move existing books.
 
 ```
-NEO Library/
+NEO Scribe Library/
   library.json          shelves, author, pen names, customWords, spellLanguage
   _catalog.txt          regenerated map of folder → title; edits are ignored
   neo-errors.log

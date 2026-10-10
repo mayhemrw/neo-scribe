@@ -54,7 +54,7 @@ async function runAll() {
   const fakes = require('./stamp-fakes.js');
   const live = process.argv.includes('--live');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'neo-devices-test-'));
-  const LIB = path.join(tmp, 'NEO Library');
+  const LIB = path.join(tmp, 'NEO Scribe Library');
   fs.mkdirSync(LIB);
   fs.writeFileSync(path.join(LIB, 'library.json'), JSON.stringify({
     authorName: '', penNames: [], firstRunDone: true, pageTheme: 'night', hintShown: true,
@@ -346,7 +346,7 @@ function deviceStep() {
   const who = STEP[0]; // A or B
   app.setPath('userData', path.join(TMP, 'app-' + who));
   app.setPath('documents', TMP);
-  const LIB = path.join(TMP, 'NEO Library');
+  const LIB = path.join(TMP, 'NEO Scribe Library');
   const loadFile = BrowserWindow.prototype.loadFile;
   BrowserWindow.prototype.loadFile = function (file, opts) {
     return loadFile.call(this, path.resolve(__dirname, '..', file), opts);
