@@ -34,7 +34,7 @@
     "package:all": "electron-builder --mac --win --linux"
   },
   "build": {
-    "appId": "com.mayhemrw.neoscribe",
+    "appId": "com.prometheanbooks.neoscribe",
     "productName": "NEO Scribe",
     "publish": {
       "provider": "github",
