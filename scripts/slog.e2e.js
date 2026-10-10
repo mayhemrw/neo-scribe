@@ -398,6 +398,28 @@ async function main() {
     await js(`structuralUndo()`);
     await tick(800);
     await pause();
+    // Hugh's snapshots (1.5.0): ⌘S, then words planted in a snapshot's file
+    // on disk, then that chapter restored from it: a restore, never typing
+    await js(`snapshotNow()`);
+    await tick(1000);
+    const snapRoot = path.join(bookDir, 'snapshots');
+    const [snapCh] = await js('book.chapterOrder');
+    const snapName = fs.readdirSync(snapRoot).sort().reverse().find((n) => fs.existsSync(path.join(snapRoot, n, snapCh + '.html')));
+    assert.ok(snapName, 'a snapshot holding the first chapter');
+    const snapFile = path.join(snapRoot, snapName, snapCh + '.html');
+    notes.planted = 'Planted in a snapshot file from outside NEO entirely.';
+    fs.writeFileSync(snapFile, fs.readFileSync(snapFile, 'utf8').replace('</p>', ' ' + notes.planted + '</p>'));
+    await js(`switchTab('darlings')`);
+    await tick(400);
+    await js(`showSnapshot(${JSON.stringify(snapName)})`);
+    await tick(800);
+    await js(`restoreSnapshot(${JSON.stringify(snapCh)})`);
+    await tick(1500);
+    await pause();
+    notes.snapRestored = (await js(`chapterHTML[${JSON.stringify(snapCh)}]`)).includes(notes.planted);
+    await js(`structuralUndo()`);
+    await tick(800);
+    await pause();
     // notes
     await js(`switchTab('notes')`);
     await tick(500);
@@ -649,7 +671,14 @@ async function main() {
         assert.equal(notes.breakGone, true);
         assert.ok(edits.some((e) => /^ch-/.test(e.doc) && e.src === 'typed' && !e.x && e.ops.some((op) => op[1] >= '<p class="scene-break">***</p>'.length - 10)), 'an edit that only deletes the break');
       }],
-      ['a section deleted to Darlings is a move there', () => assert.ok(edits.some((e) => e.doc === 'darlings' && e.src === 'move' && e.cause === 'darling' && e.from && e.x.ins.join('').includes(notes.looseWords.slice(0, 20))))],
+      ['a chapter restored from a snapshot is a restore, even words planted in its file', () => {
+        assert.equal(notes.snapRestored, true, 'restored');
+        const planted = edits.filter((e) => /^ch-/.test(e.doc) && e.x && (e.x.ins || []).join('').includes('Planted in a snapshot'));
+        assert.ok(planted.length, 'logged with its words');
+        for (const e of planted) assert.notEqual(e.src, 'typed', JSON.stringify({ src: e.src, cause: e.cause }));
+        assert.ok(planted.some((e) => e.src === 'move' && e.cause === 'restore'), JSON.stringify(planted.map((e) => [e.src, e.cause])));
+      }],
+      ['a section deleted to Darlings is a move there',() => assert.ok(edits.some((e) => e.doc === 'darlings' && e.src === 'move' && e.cause === 'darling' && e.from && e.x.ins.join('').includes(notes.looseWords.slice(0, 20))))],
       ['the export screen says what a log can and can\'t show, and that times are exact', () => {
         assert.match(notes.exportScreen, /can't show that a person pressed the keys/);
         assert.match(notes.exportScreen, /exact times/);

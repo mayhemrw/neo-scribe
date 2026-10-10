@@ -93,5 +93,25 @@
   "{n} changes to tables weren’t read.": {
     "one": "{n} change to a table wasn’t read.",
     "other": "{n} changes to tables weren’t read."
+  },
+  "{n} chapters changed": {
+    "one": "{n} chapter changed",
+    "other": "{n} chapters changed"
+  },
+  "{n} chapters differ from now": {
+    "one": "{n} chapter differs from now",
+    "other": "{n} chapters differ from now"
+  },
+  "{n} chapters added since": {
+    "one": "{n} chapter added since",
+    "other": "{n} chapters added since"
+  },
+  "{n} darlings": {
+    "one": "{n} darling",
+    "other": "{n} darlings"
+  },
+  "Snapshot taken, {time}: {n} chapters changed. It’s on the Darlings tab.": {
+    "one": "Snapshot taken, {time}: {n} chapter changed. It’s on the Darlings tab.",
+    "other": "Snapshot taken, {time}: {n} chapters changed. It’s on the Darlings tab."
   }
 }
