@@ -28,6 +28,7 @@ const F = require('./slog-files.js');
 
 const FORMAT = 1;          // log.json's version
 const CHUNK_FORMAT = 2;    // a chunk's (its open line's v); 2 adds stamp entries, and 1 still reads
+const RELINK_FORMAT = 3;   // …and a chunk with relink entries in it, so a checker that can't read them says so
 const LOG_DIR = 'scribes-log';
 const LOG_INFO = 'log.json';
 // what Windows says while something else has a file open for a moment
@@ -931,6 +932,14 @@ class Recorder {
     const s = this.session(dir, bookId, { start: true });
     if (!s.on || !s.info || doc == null || typeof text !== 'string') return false;
     const how = cleanLabel(label);
+    // words copied in another book this run of NEO can't follow (after a
+    // restart, NEO's clipboard remembers them but that book's log isn't
+    // open): they came in from outside this book, as a paste. (In this
+    // book, a lost place is found again by the scan before an export.)
+    if (how.src === 'move' && how.book && how.book !== bookId) {
+      const o = this.sessions.get(how.book);
+      if (!o || !o.info) { how.src = 'paste'; delete how.book; delete how.copy; }
+    }
     if (how.src !== 'import') s.imported = null;
     if (s.docs[doc] === undefined && (how.src === 'import' || how.src === 'arrived')) {
       how.base = how.src;
@@ -970,6 +979,33 @@ class Recorder {
       added++;
     }
     return added;
+  }
+
+  // What slog-relink.js found before an export or a report: words whose
+  // origin wasn't recorded as they were written, matched to earlier writing.
+  // [{ dev, of, from }], each a relink entry in the chunk being written (one
+  // is started if none is open): `of` the edit, on `dev`'s chain (named only
+  // when it isn't this device's). Returns how many were written.
+  relink(dir, bookId, found) {
+    const s = this.session(dir, bookId, { start: true });
+    if (!s.on || !s.info || !s.chain || !Array.isArray(found)) return 0;
+    const me = this.device();
+    const ok = found.filter((r) => r && wholeAtLeast(r.of, 1) && Array.isArray(r.from) && r.from.length &&
+      (typeof r.dev !== 'string' || /^[0-9a-f]{32}$/.test(r.dev)) && ((r.dev && r.dev !== me) || r.of <= s.chain.n));
+    if (!ok.length) return 0;
+    // relinks go in a chunk of their own format: the session's chunk (an
+    // older format) ends, and the next starts as format 3
+    if (s.chunk && s.chunk.v < RELINK_FORMAT) this._close(s, 'close');
+    s.nextV = RELINK_FORMAT;
+    let n = 0;
+    for (const r of ok) {
+      if (!r || !wholeAtLeast(r.of, 1) || !Array.isArray(r.from) || !r.from.length) continue;
+      if (typeof r.dev === 'string' && !/^[0-9a-f]{32}$/.test(r.dev)) continue;
+      if ((!r.dev || r.dev === me) && !(r.of <= s.chain.n)) continue;
+      const fields = r.dev && r.dev !== me ? { of: r.of, dev: r.dev, from: r.from } : { of: r.of, from: r.from };
+      if (this._append(s, 'relink', fields)) n++;
+    }
+    return n;
   }
 
   // The window says how a book.json it's about to save got that way. Like
@@ -1083,10 +1119,14 @@ class Recorder {
     const n = s.chain.n;
     const h = s.chain.head;
     const chunk = s.chunk;
+    // (a chunk still closing, switching the log off and on just now, has
+    // lines on their way too: both are waited for)
+    const closing = s.closing;
     if (chunk) {
       await chunk.writer.flush();
       if (chunk.writer.broken || chunk.failed) return null;
-    } else if (s.closing) await Promise.resolve(s.closing).catch(() => {});
+    }
+    if (closing) await Promise.resolve(closing).catch(() => {});
     return { dev: this.device(), n, h };
   }
   // The chunk this device is writing for a book, if one's open
@@ -1452,10 +1492,12 @@ class Recorder {
       if (name !== s.last && !taken.has(name) && !fs.existsSync(path.join(logDir, name))) break;
     }
     const prevChunk = s.last;
-    s.chunk = { name, writer: new ChunkWriter(path.join(logDir, name)), bytes: 0, failed: false };
+    const v = s.nextV || CHUNK_FORMAT;
+    s.nextV = 0;
+    s.chunk = { name, writer: new ChunkWriter(path.join(logDir, name)), bytes: 0, failed: false, v };
     s.last = name;
     s.count += 1;
-    this._write(s, 'open', { v: CHUNK_FORMAT, log: s.info.logId, dev, prevChunk, app: this.app });
+    this._write(s, 'open', { v, log: s.info.logId, dev, prevChunk, app: this.app });
     this._tell('opened', s);
   }
 
@@ -1542,7 +1584,7 @@ class Recorder {
 }
 
 module.exports = {
-  FORMAT, CHUNK_FORMAT, LOG_DIR, LOG_INFO, KINDS, CHUNK_RE, writeWhole,
+  FORMAT, CHUNK_FORMAT, RELINK_FORMAT, LOG_DIR, LOG_INFO, KINDS, CHUNK_RE, writeWhole,
   canonical, sha256hex, clearPart, entryHash, saltFor, commitment, keyId,
   normalizeManuscript, manuscriptHash, newDeviceId, newLogInfo,
   diff, tokenHunks, markupRanges, recordOps, applyOps, applyLengths,

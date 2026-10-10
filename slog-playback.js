@@ -42,11 +42,13 @@
   /*  Where text came from                                               */
   /* ------------------------------------------------------------------ */
 
-  // The colors playback offers, from the checker's detailed origins: a
-  // paste stays a paste wherever it's moved; text from a file or from
-  // before the log began is imported; typed text moved within the book is
-  // moved; what's left (arrived and never traced, unlabeled, changed while
-  // the log was off) is other
+  // The colors playback offers, from the checker's detailed origins. Moved
+  // text keeps the color of where it was first written, wherever it's
+  // moved: typed stays typed, a paste stays a paste. Text from a file or
+  // from before the log began is imported; text moved within the book whose
+  // place the log couldn't trace is "moved, origin unknown"; what's left
+  // (arrived and never traced, unlabeled, changed while the log was off) is
+  // other
   const ORIGINS = ['typed', 'pasted', 'moved', 'imported', 'editor', 'other'];
   const groupCache = new Map();
   function originGroup(o) {
@@ -57,7 +59,7 @@
     if (p.cat === 'paste' || p.cat === 'drop') g = 'pasted';
     else if (p.cat === 'import' || p.cat === 'baseline' || p.cat === 'other book') g = 'imported';
     else if (V.editorOf(p.cat) !== null) g = 'editor';
-    else if (p.moved || p.cat === 'move') g = 'moved';
+    else if (p.cat === 'move') g = 'moved';
     else if (p.cat === 'typed') g = 'typed';
     else g = 'other';
     if (groupCache.size > 5000) groupCache.clear();
@@ -230,8 +232,9 @@
   // chains: [{ dev, entries }] (checkLog's devices will do), with the words.
   // doc: the chapter's document id. opts: { links (checkLog's, for text
   // matched across computers), names (Map dev → what to call it), from,
-  // to ({ dev, n }: from just after that entry of that chain, to it) }.
-  function build(chains, doc, { links = null, names = null, from = null, to = null } = {}) {
+  // to ({ dev, n }: from just after that entry of that chain, to it),
+  // relinks (matches found but not yet written, slog-relink.js's) }.
+  function build(chains, doc, { links = null, names = null, from = null, to = null, relinks = null } = {}) {
     const lanes = new Map();
     const session = new Map(); // dev → the open entry of the chunk being read
     const hooks = (dev) => ({
@@ -254,7 +257,7 @@
     });
     // (only the category and whether it was moved: the report's full detail
     // splits text by the hour it was written, which costs far more)
-    const traced = V.traceAll(chains, { links, detail: 'moved', hooks });
+    const traced = V.traceAll(chains, { links, detail: 'moved', hooks, relinks });
     const problems = [];
     for (const [dev, t] of traced) for (const p of t.problems) if (p.doc === doc) problems.push({ dev, ...p });
 
@@ -508,7 +511,7 @@
     const status = el('div', 'pb-status');
     const sessionLine = el('div', 'pb-session');
     const legend = el('div', 'pb-legend');
-    const LEGEND = { typed: t('Typed'), pasted: t('Pasted'), moved: t('Moved'), imported: t('Imported'), editor: t('From an editor'), other: t('Other') };
+    const LEGEND = { typed: t('Typed'), pasted: t('Pasted'), moved: t('Moved, origin unknown'), imported: t('Imported'), editor: t('From an editor'), other: t('Other') };
     for (const g of ORIGINS) {
       const item = el('span', 'pb-key pb-o-' + g, LEGEND[g]);
       legend.append(item);

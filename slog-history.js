@@ -140,6 +140,9 @@ function bookFacts(text) {
   };
 }
 
+// How long playback's own matching may take, at most (slog-relink.js)
+const PLAYBACK_SCAN = 10000;
+
 class History {
   // home: this computer's own folder for checkpoints and the index cache
   // (userData/slog/history). Never inside the library.
@@ -588,10 +591,12 @@ class History {
 
   // One chapter's writing played back (slog-playback.js), as data for the
   // window: every computer's chain read whole and traced, text that arrived
-  // without a recorded source matched by its words, and the chapter's steps
-  // from `from` ({ dev, n }: a version; the chapter's start otherwise) to
-  // the end of the log. Returns the playback's data (Playback.fromData
-  // reads it) or { error }.
+  // without a recorded source matched by its words, words the log couldn't
+  // place matched to earlier writing for this chapter alone (slog-relink.js,
+  // in memory: nothing is written, the next report or export writes the
+  // same matches), and the chapter's steps from `from` ({ dev, n }: a
+  // version; the chapter's start otherwise) to the end of the log. Returns
+  // the playback's data (Playback.fromData reads it) or { error }.
   playback(dir, id, { from = null } = {}) {
     const listing = F.listLog(dir);
     if (!this._logId(listing)) return { error: 'this book has no Scribe\'s Log' };
@@ -600,8 +605,15 @@ class History {
     const chains = read.chains.map((c) => ({ dev: c.dev, entries: c.chunks.flatMap((k) => k.entries) }));
     const links = chains.length > 1 ? V.matchArrivals(chains) : null;
     const P = require('./slog-playback.js');
+    const doc = V.chapterDoc(id);
+    let relinks = null;
+    if (!read.problems.length) {
+      try {
+        relinks = require('./slog-relink.js').scan(chains, { links, docs: new Set([doc]), budget: PLAYBACK_SCAN }).relinks;
+      } catch (err) { this.onError('playback scan', err); }
+    }
     const ok = from && typeof from.dev === 'string' && Number.isSafeInteger(from.n);
-    return P.build(chains, V.chapterDoc(id), { links, from: ok ? { dev: from.dev, n: from.n } : null }).toData();
+    return P.build(chains, doc, { links, from: ok ? { dev: from.dev, n: from.n } : null, relinks }).toData();
   }
 
   // Text deleted on one chain after entry `from`, oldest first, as
