@@ -161,7 +161,7 @@ test('the command palette lists both, under Help', async () => {
     path: (el.querySelector('.pal-path') || {}).textContent || ''
   }))`);
   assert.deepEqual(rows.filter((r) => r.path === 'Help').map((r) => r.name).filter((n) => n !== 'About NEO Scribe' && n !== 'Check for Update…'),
-    ['NEO Shortcuts', 'How-To Guide…', 'FAQ…']);
+    ['NEO Shortcuts', 'How-To Guide…', 'FAQ…', 'Report a Bug or Request a Feature…']);
   await key('Escape');
   await until(async () => !(await js(`!!document.getElementById('command-palette')`)));
 });
