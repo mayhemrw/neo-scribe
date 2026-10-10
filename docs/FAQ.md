@@ -165,6 +165,10 @@ No. Tracked changes and comments only ever show in the Review tab. The writing p
 
 ## Other questions
 
+### How do I report a bug or ask for a feature?
+
+Choose **Help → Report a Bug or Request a Feature…**. It opens an email to contact@prometheanbooks.com in your mail app with your NEO Scribe version already filled in. Say what happened or what you'd like, and send it. If no mail app opens, NEO shows the address so you can write from wherever you get your email.
+
 ### How do I find a command I can't remember?
 
 Press Ctrl+K or ⌘K and type part of its name. Every menu command is there, with its shortcut.

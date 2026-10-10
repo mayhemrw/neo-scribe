@@ -38,7 +38,13 @@ if (process.platform === 'linux') app.commandLine.appendSwitch('enable-speech-di
 // ---------------------------------------------------------------------------
 // Resolved properly at startup via app.getPath('documents') — this default
 // covers any early access and non-redirected setups.
-let LIBRARY_DIR = path.join(os.homedir(), 'Documents', 'NEO Library');
+// NEO Scribe's own default folder, so it never shares books with Hugh's NEO
+const LIBRARY_NAME = 'NEO Scribe Library';
+// Where bugs and feature requests go (Help → Report a Bug or Request a
+// Feature…, and the startup error): most writers don't have a GitHub account
+const FEEDBACK_EMAIL = 'contact@prometheanbooks.com';
+const ISSUES_URL = 'github.com/mayhemrw/neo-scribe/issues';
+let LIBRARY_DIR = path.join(os.homedir(), 'Documents', LIBRARY_NAME);
 let LIBRARY_FILE = path.join(LIBRARY_DIR, 'library.json');
 
 // NEO's few app-level settings (today: a custom library folder) live in the
@@ -160,7 +166,7 @@ ipcMain.handle('i18n:reload', (e) => {
 // The library is plain files, so the writer moves them; NEO only follows.
 async function chooseLibraryFolder() {
   const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-  const defaultDir = path.join(app.getPath('documents'), 'NEO Library');
+  const defaultDir = path.join(app.getPath('documents'), LIBRARY_NAME);
   const custom = LIBRARY_DIR !== defaultDir;
   const ask = await dialog.showMessageBox(win, {
     type: 'question',
@@ -230,9 +236,9 @@ function fallbackLibraryDir() {
   const spots = [];
   try {
     const docs = path.join(home, 'Documents');
-    if (fs.statSync(docs).isDirectory()) spots.push(path.join(docs, 'NEO Library'));
+    if (fs.statSync(docs).isDirectory()) spots.push(path.join(docs, LIBRARY_NAME));
   } catch { /* no plain Documents folder here */ }
-  spots.push(path.join(home, 'NEO Library'));
+  spots.push(path.join(home, LIBRARY_NAME));
   return spots.find((dir) => dir !== LIBRARY_DIR && folderWritable(dir)) || null;
 }
 function useLibraryDir(dir) {
@@ -250,7 +256,7 @@ function useLibraryDir(dir) {
 // with the default folder for this session only; the choice stays saved.
 function isDir(dir) { try { return fs.statSync(dir).isDirectory(); } catch { return false; } }
 function awaitChosenLibrary(chosen) {
-  const fallback = path.join(app.getPath('documents'), 'NEO Library');
+  const fallback = path.join(app.getPath('documents'), LIBRARY_NAME);
   while (!isDir(chosen)) {
     const r = dialog.showMessageBoxSync({
       type: 'warning',
@@ -3043,7 +3049,7 @@ function buildMenu() {
     ...(isMac ? [{
       role: 'appMenu',
       submenu: [
-        { role: 'about', label: t('About NEO') },
+        { role: 'about', label: t('About NEO Scribe') },
         { type: 'separator' },
         { role: 'services', label: t('Services') },
         { type: 'separator' },
@@ -3411,9 +3417,10 @@ function buildMenu() {
         // docs/HOW-TO.md and docs/FAQ.md, shown in the window (guide.js)
         { label: t('How-To Guide…'), click: () => sendToWindow({ type: 'guide', name: 'how-to' }) },
         { label: t('FAQ…'), click: () => sendToWindow({ type: 'guide', name: 'faq' }) },
+        { label: t('Report a Bug or Request a Feature…'), click: () => { reportFeedback(); } },
         { type: 'separator' },
         {
-          label: t('About NEO'),
+          label: t('About NEO Scribe'),
           click: () => sendToWindow({ type: 'about' })
         },
         {
@@ -3439,6 +3446,43 @@ function buildMenu() {
       edit.submenu.on('menu-will-show', hideSystemEditItems);
     }
   }
+}
+
+// Help → Report a Bug or Request a Feature…: an email to FEEDBACK_EMAIL in
+// the writer's own mail app, with the version and system filled in. If no
+// mail app answers, the address is shown with a button to copy it.
+async function reportFeedback() {
+  const { shell, clipboard } = require('electron');
+  const version = app.getVersion();
+  const system = `${process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux'} ${os.release()} (${process.arch})`;
+  const subject = `NEO Scribe ${version}: `;
+  const body = [
+    t('What happened, or what would you like NEO Scribe to do?'),
+    '', '', '',
+    '---',
+    `NEO Scribe ${version}`,
+    system
+  ].join('\n');
+  const url = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  try {
+    await shell.openExternal(url);
+    return;
+  } catch (err) {
+    logError('feedback', err);
+  }
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  const opts = {
+    type: 'info',
+    message: t('Report a bug or request a feature'),
+    detail: t('Email {email} with what happened or what you\'d like, and include this:\n\nNEO Scribe {version}\n{system}', { email: FEEDBACK_EMAIL, version, system }),
+    buttons: [t('Copy Address'), t('OK')],
+    defaultId: 0,
+    cancelId: 1
+  };
+  try {
+    const r = await (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts));
+    if (r.response === 0) clipboard.writeText(FEEDBACK_EMAIL);
+  } catch (err) { logError('feedback', err); }
 }
 
 // No generative-AI tools in NEO — not now, not later.
@@ -3760,7 +3804,7 @@ app.whenReady().then(() => {
     if (process.platform === 'darwin' && fs.existsSync(devIcon)) {
       if (app.dock) app.dock.setIcon(devIcon);
       app.setAboutPanelOptions({
-        applicationName: 'NEO',
+        applicationName: 'NEO Scribe',
         applicationVersion: app.getVersion(),
         iconPath: devIcon
       });
@@ -3772,7 +3816,7 @@ app.whenReady().then(() => {
   try {
     // the real Documents folder (handles OneDrive-redirected Windows setups)
     try {
-      LIBRARY_DIR = path.join(app.getPath('documents'), 'NEO Library');
+      LIBRARY_DIR = path.join(app.getPath('documents'), LIBRARY_NAME);
       // …unless the writer chose their own folder (File → Library Folder…)
       const chosen = readSettings().libraryDir;
       if (chosen) LIBRARY_DIR = awaitChosenLibrary(chosen);
@@ -3821,7 +3865,7 @@ app.whenReady().then(() => {
     logError('startup', err);
     try {
       dialog.showErrorBox(t('NEO failed to start'),
-        t('Please report this at github.com/mayhemrw/neo-scribe/issues:') + '\n\n' + String((err && err.stack) || err));
+        t('Please send this to {email} (or report it at {issues}):', { email: FEEDBACK_EMAIL, issues: ISSUES_URL }) + '\n\n' + String((err && err.stack) || err));
     } catch { /* nothing left to try */ }
   }
   app.on('activate', () => {

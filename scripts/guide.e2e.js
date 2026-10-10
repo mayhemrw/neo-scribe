@@ -26,7 +26,7 @@ for (const name of fs.readdirSync(os.tmpdir())) {
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `neo-guide-test-${process.pid}-`));
 app.setPath('userData', path.join(tmp, 'app'));
 app.setPath('documents', tmp);
-const LIB = path.join(tmp, 'NEO Library');
+const LIB = path.join(tmp, 'NEO Scribe Library');
 fs.mkdirSync(LIB);
 fs.writeFileSync(path.join(LIB, 'library.json'), JSON.stringify({
   authorName: '', penNames: [], firstRunDone: true, pageTheme: 'night', hintShown: true,
@@ -160,7 +160,7 @@ test('the command palette lists both, under Help', async () => {
     name: el.querySelector('.pal-name').firstChild.textContent,
     path: (el.querySelector('.pal-path') || {}).textContent || ''
   }))`);
-  assert.deepEqual(rows.filter((r) => r.path === 'Help').map((r) => r.name).filter((n) => n !== 'About NEO' && n !== 'Check for Update…'),
+  assert.deepEqual(rows.filter((r) => r.path === 'Help').map((r) => r.name).filter((n) => n !== 'About NEO Scribe' && n !== 'Check for Update…'),
     ['NEO Shortcuts', 'How-To Guide…', 'FAQ…']);
   await key('Escape');
   await until(async () => !(await js(`!!document.getElementById('command-palette')`)));

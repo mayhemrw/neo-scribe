@@ -119,7 +119,7 @@ Hit ⌘E and NEO emails a timestamped PDF snapshot of your draft to yourself, wi
 
 **Safety**
 
-Everything is saved automatically, constantly, into plain ordinary files in a folder called NEO Library in your Documents. Open the folder and look — your chapters are just files. Back them up, sync them with Dropbox, whatever you like. If NEO disappeared tomorrow, every word you wrote would still be there. There's nothing being sent to a cloud (except your own email), nothing anyone else can read, just files on your computer.
+Everything is saved automatically, constantly, into plain ordinary files in a folder called NEO Scribe Library in your Documents. Open the folder and look — your chapters are just files. Back them up, sync them with Dropbox, whatever you like. If NEO disappeared tomorrow, every word you wrote would still be there. There's nothing being sent to a cloud (except your own email), nothing anyone else can read, just files on your computer.
 
 **That's it**
 

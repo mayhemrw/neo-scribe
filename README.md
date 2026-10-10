@@ -1,6 +1,8 @@
-# NEO
+# NEO Scribe
 
 **A distraction-free word processor for authors, by a wannabe author.**
+
+NEO Scribe is a fork of Hugh Howey's [NEO](https://github.com/hughhowey/neo) that adds the Scribe's Log (a verifiable record of how your book was written), chapter versions, manuscript format, and the Word round-trip with your editor. It's its own app: it installs beside NEO, keeps its books in its own folder, and never touches NEO's settings or library.
 
 NEO understands from the moment you install it that you are writing *books* and nothing else. No bloat, no distractions, with manuscripts that look like books as you write them.
 
@@ -11,17 +13,17 @@ NEO runs locally. WIPs are saved in plain files on your disk. No accounts or sub
 Get the latest installer from the **[Releases page](../../releases)**:
 
 - **macOS** — download the `.dmg` for older Intel machines or the arm64 file for Mac silicon. Open it and drag NEO to Applications.
-- **Windows** — get `NEO-Setup` (the installer, which keeps itself up to date) and run it, or the `portable` `.exe`, which runs without installing.
+- **Windows** — get `NEO-Scribe-Setup` (the installer, which keeps itself up to date) and run it, or the `portable` `.exe`, which runs without installing.
 
-  Your library lives in `Documents\NEO Library`. If OneDrive backs up your Documents folder, that puts your books in OneDrive too; File → Library Folder… moves the library anywhere you like. If Windows Security's *Controlled folder access* is on, Windows won't let NEO save in Documents: NEO says so when it starts, and you can allow NEO there or pick another folder.
+  Your library lives in `Documents\NEO Scribe Library`. If OneDrive backs up your Documents folder, that puts your books in OneDrive too; File → Library Folder… moves the library anywhere you like. If Windows Security's *Controlled folder access* is on, Windows won't let NEO save in Documents: NEO says so when it starts, and you can allow NEO there or pick another folder.
 - **Linux** — download the `.AppImage`, make it executable, and run it:
 
   ```
-  chmod +x NEO-*.AppImage
-  ./NEO-*.AppImage
+  chmod +x NEO-Scribe-*.AppImage
+  ./NEO-Scribe-*.AppImage
   ```
 
-  If it complains about a sandbox (common on Ubuntu 24.04 and newer), run it as `./NEO-*.AppImage --no-sandbox`. Your library lives in `~/Documents/NEO Library`; File → Library Folder… moves it anywhere you like.
+  If it complains about a sandbox (common on Ubuntu 24.04 and newer), run it as `./NEO-Scribe-*.AppImage --no-sandbox`. Your library lives in `~/Documents/NEO Scribe Library`; File → Library Folder… moves it anywhere you like.
 
 ## Why NEO?
 
@@ -94,7 +96,7 @@ Both are inside NEO too, offline: **Help → How-To Guide…** and **Help → FA
 
 ## Your files
 
-Everything lives in `~/Documents/NEO Library` — one folder per book, chapters as readable HTML, metadata as JSON. Open them in your favorite text editor.
+Everything lives in `~/Documents/NEO Scribe Library` — one folder per book, chapters as readable HTML, metadata as JSON. Open them in your favorite text editor.
 
 ## Languages
 

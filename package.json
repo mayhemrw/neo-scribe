@@ -1,6 +1,6 @@
 {
   "name": "neo",
-  "productName": "NEO",
+  "productName": "NEO Scribe",
   "version": "1.4.7",
   "description": "A word processor for authors. Distraction-free by default.",
   "homepage": "https://github.com/mayhemrw/neo-scribe",
@@ -34,8 +34,8 @@
     "package:all": "electron-builder --mac --win --linux"
   },
   "build": {
-    "appId": "com.hughhowey.neo",
-    "productName": "NEO",
+    "appId": "com.prometheanbooks.neoscribe",
+    "productName": "NEO Scribe",
     "publish": {
       "provider": "github",
       "owner": "mayhemrw",
@@ -63,7 +63,8 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "notarize": true
+      "notarize": true,
+      "artifactName": "NEO-Scribe-${version}-${arch}.${ext}"
     },
     "win": {
       "target": [
@@ -92,6 +93,7 @@
         }
       ],
       "category": "Office",
+      "artifactName": "NEO-Scribe-${version}-${arch}.${ext}",
       "synopsis": "A distraction-free word processor for authors",
       "desktop": {
         "entry": {
@@ -104,10 +106,10 @@
     "nsis": {
       "oneClick": true,
       "deleteAppDataOnUninstall": false,
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "artifactName": "NEO-Scribe-Setup-${version}.${ext}"
     },
     "portable": {
-      "artifactName": "${productName}-${version}-portable.${ext}"
+      "artifactName": "NEO-Scribe-${version}-portable.${ext}"
     },
     "asarUnpack": [
       "node_modules/dictionary-ro/**",

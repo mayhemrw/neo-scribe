@@ -56,6 +56,12 @@ button { font: inherit; cursor: pointer; }
 #shelf-header h1 {
   font-size: 22px; letter-spacing: 10px; font-weight: 300; color: var(--accent);
 }
+/* NEO Scribe: "Scribe" small under the wordmark, on the shelf and in About */
+.brand-sub {
+  display: block; margin-top: 4px; font-size: 10px; letter-spacing: 6px; font-weight: 400;
+  text-transform: uppercase; color: var(--accent); opacity: 0.7;
+}
+.modal .brand-sub { margin: -6px 0 6px; }
 .shelf-header-right { display: flex; gap: 16px; align-items: center; -webkit-app-region: no-drag; }
 #author-chip { color: var(--muted); font-size: 13px; cursor: pointer; }
 #author-chip:hover { color: #ddd; }

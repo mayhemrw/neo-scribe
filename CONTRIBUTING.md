@@ -15,7 +15,7 @@ Good territory: bug fixes, performance, accessibility, better import/export prec
 - `app.js` — the entire UI: bookshelf, editor, outline, search, goals.
 - `styles.css` — all styling, with CSS variables at the top.
 
-Books are folders of plain files in `~/Documents/NEO Library`: `book.json` for metadata, `chapters/*.html` for text, JSON files for darlings/stickies.
+Books are folders of plain files in `~/Documents/NEO Scribe Library`: `book.json` for metadata, `chapters/*.html` for text, JSON files for darlings/stickies.
 
 ## Ground rules
 
@@ -29,4 +29,4 @@ Books are folders of plain files in `~/Documents/NEO Library`: `book.json` for m
 - Run from source: `npm install && npm start` (needs Node.js).
 - Keep PRs focused — one feature or fix each.
 - Describe the writer-facing behavior in your PR, not just the code. Think like an author, not a programmer!
-- Bug reports: please include your OS, what you did, what happened, and the tail of `~/Documents/NEO Library/neo-errors.log` if it's a crash.
+- Bug reports: please include your OS, what you did, what happened, and the tail of `~/Documents/NEO Scribe Library/neo-errors.log` if it's a crash.

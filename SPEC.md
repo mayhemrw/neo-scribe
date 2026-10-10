@@ -8,7 +8,7 @@ This fork of [Neo](https://github.com/hughhowey/neo) adds a verifiable writing-p
 
 Two problems drive it. Publishers increasingly want authors to show they wrote their books, and Neo has no process record beyond its SHA-256 PDF snapshot. And every editor and publisher works in Word, so Neo is a dead end once a manuscript leaves the author's hands.
 
-Neo is MIT-licensed and small: an Electron shell (`main.js`), a preload bridge (`preload.js`), and a renderer (`app.js`, `styles.css`, `index.html`). Books live in `~/Documents/NEO Library`, one folder per book, chapters as HTML, metadata as JSON. All new features follow that same plain-files approach.
+Neo is MIT-licensed and small: an Electron shell (`main.js`), a preload bridge (`preload.js`), and a renderer (`app.js`, `styles.css`, `index.html`). Books live in `~/Documents/NEO Scribe Library`, one folder per book, chapters as HTML, metadata as JSON. All new features follow that same plain-files approach.
 
 ## Design principles
 
