@@ -232,8 +232,9 @@
   // chains: [{ dev, entries }] (checkLog's devices will do), with the words.
   // doc: the chapter's document id. opts: { links (checkLog's, for text
   // matched across computers), names (Map dev → what to call it), from,
-  // to ({ dev, n }: from just after that entry of that chain, to it) }.
-  function build(chains, doc, { links = null, names = null, from = null, to = null } = {}) {
+  // to ({ dev, n }: from just after that entry of that chain, to it),
+  // relinks (matches found but not yet written, slog-relink.js's) }.
+  function build(chains, doc, { links = null, names = null, from = null, to = null, relinks = null } = {}) {
     const lanes = new Map();
     const session = new Map(); // dev → the open entry of the chunk being read
     const hooks = (dev) => ({
@@ -256,7 +257,7 @@
     });
     // (only the category and whether it was moved: the report's full detail
     // splits text by the hour it was written, which costs far more)
-    const traced = V.traceAll(chains, { links, detail: 'moved', hooks });
+    const traced = V.traceAll(chains, { links, detail: 'moved', hooks, relinks });
     const problems = [];
     for (const [dev, t] of traced) for (const p of t.problems) if (p.doc === doc) problems.push({ dev, ...p });
 

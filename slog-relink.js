@@ -261,7 +261,8 @@
   // devices: [{ dev, entries }] with their words; links as checkChains gives
   // them. budget: ms to spend looking, at most (an enormous book's later
   // edits are left as they are, and `cut` says so; what was found holds).
-  function scan(devices, { links = null, budget = 0 } = {}) {
+  // docs: a Set of the documents whose edits are looked at (all, when null)
+  function scan(devices, { links = null, budget = 0, docs = null } = {}) {
     const found = [];
     const deadline = budget > 0 ? Date.now() + budget : Infinity;
     let cut = false;
@@ -330,6 +331,7 @@
         },
         pre(e, tracer) {
           if (e.kind !== 'edit' || !V.RELINKABLE.has(e.src) || !e.x || !Array.isArray(e.x.ins)) return;
+          if (docs && !docs.has(e.doc)) return;
           if (!e.ops.some((op) => op[2] >= MIN)) return;
           if (cut || Date.now() > deadline) { cut = true; return; }
           const target = V.originOf(e);

@@ -591,6 +591,42 @@ describe('the Recorder writes relinks', () => {
   });
 });
 
+describe('Chapter History\'s Play matches the chapter\'s untraced words first', () => {
+  test('a move whose place the log lost plays as typed, and nothing is written', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'neo-relink-home-'));
+    const lib = fs.mkdtempSync(path.join(os.tmpdir(), 'neo-relink-lib-'));
+    const dir = path.join(lib, 'book-x');
+    fs.mkdirSync(path.join(dir, 'chapters'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'book.json'), JSON.stringify({ id: 'x', title: 'X', chapterOrder: ['c1', 'c2'] }));
+    try {
+      // cut from one chapter in one run of NEO…
+      const first = new slog.Recorder({ home, app: 'test' });
+      first.open(dir, 'x');
+      first.observe(dir, 'x', 'c1', P(TYPED), { src: 'typed' });
+      first.observe(dir, 'x', 'c1', '', { src: 'typed' });
+      await first.close('x');
+      // …pasted into another in the next: a move, its place lost
+      const rec = new slog.Recorder({ home, app: 'test' });
+      rec.open(dir, 'x');
+      rec.observe(dir, 'x', 'c2', P(TYPED), { src: 'move' });
+      await rec.close('x');
+      const F = require('../slog-files.js');
+      const files = () => [...F.listLog(dir).files.keys()].sort().join('|');
+      const before = files();
+      const { History } = require('../slog-history.js');
+      const PB = require('../slog-playback.js');
+      const pb = PB.Playback.fromData(new History({ home: path.join(home, 'history') }).playback(dir, 'c2'));
+      const end = pb.frame(pb.length, { origins: true });
+      assert.match(end.html, /pb-o-typed/);
+      assert.doesNotMatch(end.html, /pb-o-moved/);
+      assert.equal(files(), before, 'playing writes nothing to the log');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(lib, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('NEO\'s clipboard across books', () => {
   test('words copied in a book whose log isn\'t open this run are a paste, not a move', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'neo-relink-home-'));

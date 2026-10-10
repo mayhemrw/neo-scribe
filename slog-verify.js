@@ -1252,9 +1252,18 @@
     }
   }
 
-  function traceAll(chains, { links = null, detail = false, hooks = null } = {}) {
+  // (relinks: [{ dev, of, from }] found but not written, as slog-relink.js
+  // gives them, applied after the log's own; History's playback uses them)
+  function traceAll(chains, { links = null, detail = false, hooks = null, relinks = null } = {}) {
     const tracers = new Map();
     const rel = collectRelinks(chains);
+    for (const r of relinks || []) {
+      if (!r || typeof r.dev !== 'string' || !Number.isSafeInteger(r.of) || !Array.isArray(r.from)) continue;
+      if (!rel.byDev.has(r.dev)) rel.byDev.set(r.dev, new Map());
+      const m = rel.byDev.get(r.dev);
+      if (!m.has(r.of)) m.set(r.of, []);
+      m.get(r.of).push({ pieces: r.from, by: { dev: '(found)', n: Infinity } });
+    }
     const resolve = (dev, n, doc) => {
       const t = tracers.get(dev);
       if (!t) return { error: 'from names a device whose log isn\'t here' };

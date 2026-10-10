@@ -67,7 +67,7 @@ Yes. Words keep where they were first written, wherever they end up: cut and pas
 
 ### What's "Moved, origin unknown"?
 
-Words NEO saw come off its own clipboard, or one of its own tools, but whose first appearance in the book it couldn't trace. It should be rare: before every report and export, NEO looks again through everything ever deleted from the book, and the book as it stood, and places what it can. Words copied from another book are only followed while that book has been open in the same run of NEO; otherwise they count as pasted.
+Words NEO saw come off its own clipboard, or one of its own tools, but whose first appearance in the book it couldn't trace. It should be rare: before every report and export, and before **Play** in Chapter History, NEO looks again through everything ever deleted from the book, and the book as it stood, and places what it can. Words copied from another book are only followed while that book has been open in the same run of NEO; otherwise they count as pasted.
 
 ### I sent a chapter to my editor and pasted their version back. What happens?
 
