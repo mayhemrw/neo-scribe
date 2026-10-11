@@ -4912,10 +4912,10 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     if (currentTab === 'manuscript') darlingFromKeyboard();
   }
-  // ⌘S takes a snapshot of the book (SNAPSHOTS)
+  // ⌘S saves a version of the book (NEO Scribe; Hugh's took a snapshot)
   if (cmd && !e.altKey && !e.shiftKey && (e.code === 'KeyS' || e.key === 's')) {
     e.preventDefault();
-    snapshotNow();
+    if (SNAPSHOTS.on) snapshotNow(); else saveVersionNow();
   }
   if (isSpellcheckShortcut(e)) {
     e.preventDefault();
@@ -11466,7 +11466,7 @@ function slogCauseOf(label) {
   if (l === 'replace' || l === 'replace all') return { src: 'typed', cause: 'replace' };
   if (l === 'darling' || l === 'darling restore' || l === 'chapter delete' || l === 'section delete' || l === 'scene delete' || l === 'cards delete') return { src: 'move', cause: 'darling' };
   if (l === 'darling delete') return { src: 'typed', cause: 'darling' };
-  if (l === 'restore' || l === 'restore chapter' || l === 'restore titles' || l === 'snapshot') return { src: 'move', cause: 'restore' };
+  if (l === 'restore' || l === 'restore chapter' || l === 'restore titles' || l === 'restore book' || l === 'snapshot') return { src: 'move', cause: 'restore' };
   if (/^(card moved|card to chapter|card to loose|loose card placed|scene moved|chapter reorder|outline section to chapter)$/.test(l)) return { src: 'move', cause: 'outline' };
   if (/^(outline|card|scene|loose card) /.test(l)) return { src: 'typed', cause: 'outline' };
   return { src: 'typed' };
@@ -11805,6 +11805,42 @@ async function nameVersion(msg) {
   toast(t('Saved this version of the book as “{name}”.', { name: res.name }), 5000);
 }
 
+// ⌘S (File → Save Version): a version of the book named for the time,
+// "Saved Oct 10, 4:51 PM", with no questions; it's listed in Chapter
+// History like any named version, where it can be renamed. Nothing changed
+// since the last one: nothing saved, and the toast says so.
+const saveVersionLast = {}; // bookId → { sig, name }
+let saveVersionBusy = false;
+function saveVersionSig() {
+  const parts = [JSON.stringify(book.chapterOrder), JSON.stringify(book.chapterTitles || {})];
+  for (const id of book.chapterOrder) parts.push(id + ':' + textHash(chapterHTML[id] || ''));
+  return parts.join('|');
+}
+async function saveVersionNow() {
+  const h = window.neo && window.neo.history;
+  if (!book || !h || !h.mark || saveVersionBusy) return;
+  const bookId = book.id;
+  const sig = saveVersionSig();
+  const last = saveVersionLast[bookId];
+  if (last && last.sig === sig) {
+    toast(t('Nothing has changed since “{name}”.', { name: last.name }), 3500);
+    return;
+  }
+  saveVersionBusy = true;
+  try {
+    await slogSaveAll();
+    if (!book || book.id !== bookId) return;
+    const name = t('Saved {when}', { when: historyDate(Date.now()) });
+    let res;
+    try { res = await h.mark(bookId, name); } catch (err) { res = { error: (err && err.message) || String(err) }; }
+    if (!res || res.error) { toast((res && res.error) || t('The version wasn\'t saved.'), 8000); return; }
+    saveVersionLast[bookId] = { sig, name: res.name };
+    toast(t('Saved this version of the book as “{name}”. It’s in Chapter History.', { name: res.name }), 4000);
+  } finally {
+    saveVersionBusy = false;
+  }
+}
+
 /* ================================================================== */
 /*  CHAPTER HISTORY                                                    */
 /* ================================================================== */
@@ -11950,6 +11986,65 @@ async function historyRestoreTitles(got, name) {
   toast(t('{n} chapter titles are back as they were in “{name}”.', { n: ids.length, name }) + ' ' + t('{key} to undo.', { key: KZ }), 8000);
   return ids.length;
 }
+// Restore Whole Book (NEO Scribe), on a named version: the book as it was
+// then, as one undoable step. Every chapter it held gets its words back,
+// chapters deleted since come back, the order, titles and kinds are as
+// they were (a copy kept with the log off has no kinds: those stay), and
+// chapters written since go to Darlings, as a deleted chapter's words do.
+// A contents page stays where it stands. Notes, outline notes, loose cards
+// and the rest of book.json aren't touched. got: history.restoreBook's
+// answer. Returns how many chapters changed.
+async function historyRestoreBook(got, name, version) {
+  if (!book || !got || !Array.isArray(got.order) || !got.chapters) return 0;
+  const has = (id) => typeof got.chapters[id] === 'string' || book.chapterOrder.includes(id);
+  const order = got.order.filter((id, i) => has(id) && got.order.indexOf(id) === i);
+  if (!order.length) return 0;
+  const contents = book.chapterOrder.filter((id) => !order.includes(id) && chapterKind(id) === 'contents');
+  const since = book.chapterOrder.filter((id) => !order.includes(id) && chapterKind(id) !== 'contents');
+  if (currentTab !== 'manuscript') switchTab('manuscript');
+  let changed = 0;
+  await slogWith({ src: 'move', cause: 'restore' }, async () => {
+    snapshotStructure('restore book');
+    // chapters written since the version: their words to Darlings, as a
+    // chapter deleted (one step with the rest: ⌘Z brings them back)
+    for (const id of since) { await deleteChapterToDarlings(id, true); changed++; }
+    const newOrder = [...order];
+    for (const id of contents) newOrder.splice(Math.min(book.chapterOrder.indexOf(id), newOrder.length), 0, id);
+    const touched = [];
+    for (const id of order) {
+      const html = got.chapters[id];
+      if (typeof html !== 'string') continue; // the version doesn't hold its words: it stays as it is
+      if (!book.chapterOrder.includes(id) || chapterHTML[id] !== html) { chapterHTML[id] = html; touched.push(id); }
+    }
+    const titles = { ...(book.chapterTitles || {}) };
+    const kinds = { ...(book.chapterKinds || {}) };
+    for (const id of order) {
+      const then = String((got.titles || {})[id] || '').trim();
+      if (then) titles[id] = then; else delete titles[id];
+      if (got.kinds) { if (got.kinds[id]) kinds[id] = got.kinds[id]; else delete kinds[id]; }
+    }
+    const metaChanged = JSON.stringify(newOrder) !== JSON.stringify(book.chapterOrder) ||
+      JSON.stringify(titles) !== JSON.stringify(book.chapterTitles || {}) || JSON.stringify(kinds) !== JSON.stringify(book.chapterKinds || {});
+    book.chapterOrder = newOrder;
+    book.chapterTitles = titles;
+    book.chapterKinds = kinds;
+    wordCache = {};
+    renderChapters();
+    // a chapter's file is written before book.json takes it in
+    for (const id of touched) await persistChapter(id);
+    if (metaChanged) await saveMeta();
+    changed += touched.length + (metaChanged && !touched.length ? 1 : 0);
+  });
+  breakRun++; // ⌘Z, before any typing, undoes it
+  $('#paper-scroll').scrollTop = 0;
+  updateCounters();
+  scheduleNavRefresh();
+  const moved = since.length ? ' ' + t('{n} chapters written since are in Darlings.', { n: since.length }) : '';
+  toast((version
+    ? t('The book is back to “{name}”. The book as it was is the version “{before}”, or {key} to undo.', { name, before: version.name, key: KZ })
+    : t('The book is back to “{name}”. {key} to undo.', { name, key: KZ })) + moved, 10000);
+  return changed;
+}
 // Restore as New Chapter: a chapter no longer in the book, back under its
 // own id (so its history carries on), with its title, in its old place:
 // after the chapter it followed if that's still there (first if it was
@@ -12014,6 +12109,7 @@ async function showHistory(msg) {
               <button type="button" data-mode="play" aria-pressed="false" title="${escHtml(t('Watch the chapter being written, change by change'))}">${escHtml(t('Play'))}</button>
             </div>
             <span class="hv-named-tools" hidden>
+              <button type="button" class="btn-quiet hv-book" hidden title="${escHtml(t('Every chapter, its title and its place as they were in this version. Chapters written since go to Darlings.'))}">${escHtml(t('Restore Whole Book…'))}</button>
               <button type="button" class="btn-quiet hv-titles" hidden title="${escHtml(t('Every chapter’s title as it was in this version. The text stays as it is.'))}">${escHtml(t('Restore All Chapter Titles'))}</button>
               <button type="button" class="btn-quiet hv-rename">${escHtml(t('Rename…'))}</button>
               <button type="button" class="btn-quiet hv-delete">${escHtml(t('Delete…'))}</button>
@@ -12199,6 +12295,7 @@ async function showHistory(msg) {
     bd.querySelector('.hv-name').textContent = e.named ? e.name : historyDate(e.at);
     bd.querySelector('.hv-sub').textContent = [e.named ? historyDate(e.at) : '', historyDevice(st.data, e.dev), historyKindLabel(e)].filter(Boolean).join(' · ');
     bd.querySelector('.hv-named-tools').hidden = !e.named;
+    bd.querySelector('.hv-book').hidden = !e.named || !h.restoreBook;
     showTitlesButton(e, seq);
     restoreBtn.hidden = !h.restore || !!e.broken;
     restoreBtn.textContent = inBook() ? t('Restore This Version') : t('Restore as New Chapter');
@@ -12449,6 +12546,33 @@ async function showHistory(msg) {
     await slogSaveAll();
     close();
     await historyRestoreTitles(got, e.name);
+  };
+  // Restore Whole Book…: the book as it was in this named version, after
+  // a version of the book as it stands now ("Before restoring the book…")
+  bd.querySelector('.hv-book').onclick = async () => {
+    const e = entry(st.sel);
+    const b = bd.querySelector('.hv-book');
+    if (!e || !e.named || !h.restoreBook || b.disabled) return;
+    const ok = await optionModal(escHtml(t('Restore Whole Book')),
+      escHtml(t('Every chapter goes back to how it was in “{name}”: its words, its title and its place. Chapters written since go to Darlings. The book as it is now is saved as a version first, and {key} undoes it.', { name: e.name, key: KZ })), [
+        { label: escHtml(t('Restore the Book')), value: true }
+      ]);
+    focusSelected();
+    if (!ok || !bd.isConnected || !book || book.id !== bookId) return;
+    b.disabled = true;
+    await slogSaveAll();
+    const day = new Date().toLocaleDateString(NeoI18n.getLocale(), { month: 'short', day: 'numeric' });
+    const name = t('Before restoring the book to “{name}” ({date})', { name: e.name, date: day });
+    let res;
+    try { res = await h.restoreBook(bookId, e.ref, { at: e.at, name }); } catch (err) { res = { error: (err && err.message) || String(err) }; }
+    b.disabled = false;
+    if (!bd.isConnected || !book || book.id !== bookId) return;
+    if (!res || res.error || !Array.isArray(res.order)) {
+      toast(t('The book wasn’t restored: {why}', { why: (res && res.error) || '?' }), 8000);
+      return;
+    }
+    close();
+    await historyRestoreBook(res, e.name, res.version);
   };
   bd.querySelector('.hv-rename').onclick = async () => {
     const e = entry(st.sel);
@@ -12800,7 +12924,13 @@ function snapHolderEl(html) {
 }
 const htmlWords = (html) => countWords(plainText(snapHolderEl(html)));
 const htmlParas = (html) => [...snapHolderEl(html).children].map((p) => p.textContent);
-const snapsCan = () => !!(window.neo && window.neo.snapshotWrite);
+// NEO Scribe: Hugh's Snapshots stay off (no daily snapshots, no list on
+// Darlings, no Take Snapshot). Chapter History has every session, named
+// versions and Restore Whole Book, all backed by the Scribe's Log; ⌘S saves
+// a version there instead (saveVersionNow). The code stays, so merging
+// Hugh's changes stays easy.
+const SNAPSHOTS = { on: false }; // (slog.e2e.js turns it on for its snapshot check)
+const snapsCan = () => SNAPSHOTS.on && !!(window.neo && window.neo.snapshotWrite);
 const logSnap = (err) => window.neo.logError('snapshot: ' + ((err && err.message) || err));
 
 // The book's snapshots, oldest first: { name, at, kind, changed, words, files: Set }.
@@ -12955,7 +13085,7 @@ function snapList() {
   return list;
 }
 async function renderSnapList() {
-  if (!book || currentTab !== 'darlings') return;
+  if (!book || currentTab !== 'darlings' || !snapsCan()) return;
   const list = snapList();
   const bookId = book.id;
   let snaps = [];
@@ -16568,7 +16698,7 @@ function bookShortcutSections() {
     ] },
     { title: tk('App & files'), rows: [
       [KHELP, tk('Keyboard shortcuts')],
-      [K('⌘S', 'Ctrl+S'), tk('Take a snapshot of the book'), tk('NEO saves as you type; a snapshot keeps the book as it stands now. They’re on the Darlings tab.')],
+      ...(window.neo && window.neo.history && window.neo.history.mark ? [[K('⌘S', 'Ctrl+S'), tk('Save a version of the book'), tk('NEO saves as you type; a version keeps the book as it stands now, named for the time. It’s in Chapter History.')]] : []),
       [K('⌘,', 'Ctrl+,'), tk('Goals and writing sprints')],
       [K('⌘⇧I', 'Ctrl+Shift+I'), tk('Import manuscripts')],
       [K('⌘E', 'Ctrl+E'), tk('Email a draft to yourself')],
@@ -20858,7 +20988,8 @@ window.neo.onMenu(async (msg) => {
     await writeLibrary(library);
   }
   if (msg.type === 'emailDraft') doEmailDraft();
-  if (msg.type === 'snapshot' && book && !$('#editor-view').hidden) snapshotNow();
+  if (msg.type === 'snapshot' && book && !$('#editor-view').hidden && SNAPSHOTS.on) snapshotNow();
+  if (msg.type === 'saveVersion' && book && msg.bookId === book.id && !$('#editor-view').hidden) saveVersionNow();
   if (msg.type === 'emailSettings') emailSettings();
   if (msg.type === 'find') openSearch();
   if (msg.type === 'spellcheck') toggleSpellcheck();

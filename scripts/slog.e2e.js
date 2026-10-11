@@ -398,8 +398,10 @@ async function main() {
     await js(`structuralUndo()`);
     await tick(800);
     await pause();
-    // Hugh's snapshots (1.5.0): ⌘S, then words planted in a snapshot's file
-    // on disk, then that chapter restored from it: a restore, never typing
+    // Hugh's snapshots (1.5.0; off in NEO Scribe, on here for this check):
+    // a snapshot, then words planted in its file on disk, then that chapter
+    // restored from it: a restore, never typing
+    await js(`SNAPSHOTS.on = true`);
     await js(`snapshotNow()`);
     await tick(1000);
     const snapRoot = path.join(bookDir, 'snapshots');
@@ -420,6 +422,8 @@ async function main() {
     await js(`structuralUndo()`);
     await tick(800);
     await pause();
+    await js(`SNAPSHOTS.on = false; switchTab('manuscript')`);
+    await tick(300);
     // notes
     await js(`switchTab('notes')`);
     await tick(500);

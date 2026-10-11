@@ -97,15 +97,19 @@ Sure. **File → Scribe's Log → Verification Report…** sums it up, and **Vie
 
 ### What's a version?
 
-The book as it was at some moment. NEO rebuilds one for every writing session from the Scribe's Log, so you get them without lifting a finger. You can also name one (**File → Name This Version…**), and NEO names one by itself before anything big: restoring a chapter, Replace All, accepting a batch of an editor's changes, and sending a file to an editor.
+The book as it was at some moment. NEO rebuilds one for every writing session from the Scribe's Log, so you get them without lifting a finger. You can also save one yourself: Ctrl+S or ⌘S (**File → Save Version**) names it for the time, and **File → Name This Version…** lets you name it. NEO names one by itself before anything big: restoring a chapter, Replace All, accepting a batch of an editor's changes, and sending a file to an editor.
 
 ### Where are versions kept?
 
 Named versions live in the book's `versions` folder, a few small files, along with the chapter copies NEO keeps while the log is off. The rest are rebuilt from the log when you open **View → Chapter History…** Versions are never part of a log export or a report.
 
+### Does Ctrl+S save my book?
+
+Your book is already saved: NEO saves as you type. Ctrl+S or ⌘S saves a version of the whole book, named for the time, that you can come back to in **View → Chapter History…**
+
 ### Can I undo a restore?
 
-Yes. Ctrl+Z or ⌘Z undoes it right away, and NEO saves a version of the book before every whole-chapter restore, so you can go back even after a restart.
+Yes. Ctrl+Z or ⌘Z undoes it right away, and NEO saves a version of the book before every whole-chapter or whole-book restore, so you can go back even after a restart.
 
 ### I deleted a chapter. Is it gone?
 

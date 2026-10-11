@@ -495,6 +495,85 @@ test('Restore as New Chapter: a deleted chapter back in its old place', async ()
   await key('Escape');
 });
 
+// NEO Scribe: ⌘S saves a version (Hugh's Snapshots stay off)
+test('⌘S saves a version named for the time; again with nothing changed, it says so', async () => {
+  const dir = path.join(LIB, bookId);
+  const file = Menu.getApplicationMenu().items.find((x) => x.label === 'File').submenu.items;
+  assert.ok(file.some((x) => x.label === 'Save Version' && /S$/.test(x.accelerator)), 'File → Save Version, ⌘S');
+  assert.ok(!file.some((x) => x.label === 'Take Snapshot'), 'no Take Snapshot');
+  const before = H.listNamed(dir).length;
+  await caretEnd(1, 0);
+  await key('S', [MOD]);
+  await until('a version saved', `document.querySelector('#hint').textContent.includes('in Chapter History')`);
+  const named = H.listNamed(dir);
+  assert.equal(named.length, before + 1);
+  const saved = named.find((v) => /^Saved /.test(v.name));
+  assert.ok(saved, named.map((v) => v.name).join(', '));
+  assert.equal(saved.auto, null, 'the writer\'s own');
+  notes.saved = saved;
+  notes.atSave = await js(`({ order: book.chapterOrder.slice(), html: { ...chapterHTML } })`);
+  await tick(300);
+  await key('S', [MOD]);
+  await until('nothing new', `document.querySelector('#hint').textContent.startsWith('Nothing has changed since')`);
+  assert.equal(H.listNamed(dir).length, before + 1);
+  // and no snapshots, ever: no folder, nothing on the Darlings tab
+  await js(`switchTab('darlings')`);
+  await tick(300);
+  assert.equal(await js(`$('#editor-view').classList.contains('darlings-tab')`), false);
+  await js(`switchTab('manuscript')`);
+  await tick(300);
+  assert.equal(fs.existsSync(path.join(dir, 'snapshots')), false);
+});
+
+test('Restore Whole Book…: every chapter as the version had it; a chapter written since goes to Darlings', async () => {
+  const dir = path.join(LIB, bookId);
+  // after the save: words typed in the second chapter, and a new chapter
+  await caretEnd(1, 0);
+  await type(' Written after the save.');
+  await pause();
+  await caretEnd(2, 0);
+  await js(`slogWith({ src: 'typed' }, () => newChapter())`);
+  await tick(400);
+  await type('A chapter that came later.');
+  await pause();
+  await js(`slogSaveAll()`);
+  notes.later = await js(`book.chapterOrder.find((c) => !${JSON.stringify(ids)}.includes(c))`);
+  assert.ok(notes.later, 'a new chapter');
+  notes.darlingsBefore = await js(`darlings.length`);
+  await openHistory(ids[0]);
+  const list = await items();
+  await pick(list.findIndex((x) => x.name === notes.saved.name));
+  assert.equal(await js(`${hv('.hv-book')}.hidden`), false, 'on a named version');
+  await js(`${hv('.hv-book')}.click()`);
+  // (the newest dialog: #firstrun's own choices are hidden behind)
+  await until('the question', `!!document.querySelector('.modal-backdrop:not(#chapter-history):not(#firstrun) .fr-choice')`);
+  await js(`document.querySelector('.modal-backdrop:not(#chapter-history):not(#firstrun) .fr-choice').click()`);
+  await until('the window closed', `!document.querySelector('#chapter-history')`);
+  await until('the book put back', `!book.chapterOrder.includes(${JSON.stringify(notes.later)})`);
+  assert.deepEqual(await js(`book.chapterOrder.slice()`), notes.atSave.order);
+  for (const id of ids) assert.equal(await js(`chapterHTML[${JSON.stringify(id)}]`), notes.atSave.html[id], id);
+  assert.equal(await js(`darlings.length`), notes.darlingsBefore + 1);
+  assert.ok(await js(`darlings.some((d) => d.html.includes('A chapter that came later.'))`), 'the later chapter\'s words in Darlings');
+  assert.match(await js(`document.querySelector('#hint').textContent`), /The book is back to “Saved .*The book as it was is the version “Before restoring the book.*1 chapters? written since (is|are) in Darlings/);
+  const before = H.listNamed(dir).find((v) => /^Before restoring the book/.test(v.name));
+  assert.ok(before && before.auto === 'restore', 'the book as it stood, saved first');
+  const was = await js(`window.neo.history.text(book.id, { named: ${JSON.stringify(before.file)} }, ${JSON.stringify(notes.later)})`);
+  assert.ok(was.text && was.text.includes('A chapter that came later.'), 'and it holds the later chapter');
+  await until('saved', `!Object.keys(chapterChain).length`);
+  assert.equal(fs.existsSync(path.join(dir, 'chapters', notes.later + '.html')), false);
+  assert.equal(fs.readFileSync(path.join(dir, 'chapters', ids[1] + '.html'), 'utf8'), notes.atSave.html[ids[1]]);
+});
+
+test('⌘Z undoes the whole-book restore in one step', async () => {
+  await key('Z', [MOD]);
+  await until('undone', `book.chapterOrder.includes(${JSON.stringify(notes.later)})`);
+  assert.ok((await js(`chapterHTML[${JSON.stringify(ids[1])}]`)).includes('Written after the save.'));
+  assert.ok((await js(`chapterHTML[${JSON.stringify(notes.later)}]`)).includes('A chapter that came later.'));
+  assert.equal(await js(`darlings.length`), notes.darlingsBefore);
+  await pause();
+  await js(`slogSaveAll()`);
+});
+
 test('the log: every restore is one, and the words keep their origins', async () => {
   await js(`slogSaveAll()`);
   await tick(500);
@@ -530,7 +609,7 @@ test('the log still checks, and the window wrote nothing into the book but the n
   assert.equal(res.ok, true);
   assert.ok(fs.existsSync(path.join(tmp, 'app', 'slog', 'history')), 'checkpoints in userData');
   assert.deepEqual(fs.readdirSync(dir).filter((f) => /history|\.gz$/.test(f)), []);
-  assert.deepEqual(H.listNamed(dir).map((v) => v.auto), ['restore', 'restore'], 'the only versions written: before each restore');
+  assert.deepEqual(H.listNamed(dir).map((v) => v.auto).sort(), [null, 'restore', 'restore', 'restore'], 'the only versions written: before each restore, and ⌘S\'s');
   let errors = '';
   try { errors = fs.readFileSync(path.join(LIB, 'neo-errors.log'), 'utf8'); } catch { /* none */ }
   assert.equal(errors, '');

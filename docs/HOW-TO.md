@@ -72,10 +72,19 @@ Restored words keep their history: words you typed come back as typed, and a pas
 
 About to send a draft out, or take a chainsaw to the middle of the book? Give yourself a bookmark first.
 
-1. Choose **File → Name This Version…**
-2. Give it a name, like "Sent to Maria" or "Before the big cut".
+- Quickest: press Ctrl+S or ⌘S (**File → Save Version**). NEO saves a version of the whole book named for the time, like "Saved Oct 10, 4:51 PM". Press it again before you've changed anything and NEO just tells you nothing's changed.
+- With a name: choose **File → Name This Version…** and call it something like "Sent to Maria" or "Before the big cut".
 
-Named versions show in **View → Chapter History…** beside every chapter they hold, where you can rename or delete them. A named version can even put every chapter's title back at once: **Restore All Chapter Titles**.
+Your writing is saved as you type either way; a version is a point you can come back to. Named versions show in **View → Chapter History…** beside every chapter they hold, where you can rename or delete them. A named version can even put every chapter's title back at once: **Restore All Chapter Titles**.
+
+## Put the whole book back the way it was
+
+Rewrote half the book and want last week's back? A named version holds all of it.
+
+1. Choose **View → Chapter History…** (Ctrl+Shift+H or ⌘⇧H) and click a named version on the left (one you saved with Ctrl+S or named, or one NEO named itself).
+2. Click **Restore Whole Book…** and then **Restore the Book**.
+
+Every chapter goes back to how it was then: its words, its title and its place. Chapters you deleted since come back, and chapters you wrote since go to Darlings. NEO saves a version of the book as it stands first ("Before restoring the book to…"), and Ctrl+Z or ⌘Z undoes the whole thing in one step. Notes, outline notes and loose cards stay as they are.
 
 ## Replace a word across the whole book
 

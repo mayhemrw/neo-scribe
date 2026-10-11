@@ -11,6 +11,9 @@
 //   { id, type: 'titles', home, dir, ref }      versionTitles
 //   { id, type: 'restore', home, dir, ref, chapter, me, at, logged }
 //                                              restoreSource
+//   { id, type: 'restoreBook', home, dir, ref, me, at, logged }
+//                                              restoreBookSource (NEO
+//                                              Scribe's Restore Whole Book)
 //   { id, type: 'playback', home, dir, chapter, from }  playback (data)
 //   { id, type: 'scan', home, dir, budget }    origin tracing before an
 //                                              export or a report
@@ -36,6 +39,7 @@ function reply(msg) {
     else if (msg.type === 'text') value = history.versionText(msg.dir, msg.ref, msg.chapter);
     else if (msg.type === 'titles') value = history.versionTitles(msg.dir, msg.ref);
     else if (msg.type === 'restore') value = history.restoreSource(msg.dir, msg.ref, msg.chapter, { me: msg.me, at: msg.at, logged: msg.logged });
+    else if (msg.type === 'restoreBook') value = history.restoreBookSource(msg.dir, msg.ref, { me: msg.me, at: msg.at, logged: msg.logged });
     else if (msg.type === 'playback') value = history.playback(msg.dir, msg.chapter, { from: msg.from });
     else if (msg.type === 'scan') value = scanBook(msg.dir, msg.budget);
     else throw new Error('unknown request: ' + msg.type);

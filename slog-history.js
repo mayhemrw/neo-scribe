@@ -572,6 +572,13 @@ class History {
   restoreSource(dir, ref, id, { me = null, at = null, logged = true } = {}) {
     const got = this.versionText(dir, ref, id);
     if (got.error || !logged || typeof me !== 'string') return got.error ? got : { text: got.text, dels: [] };
+    return { text: got.text, dels: this.deletionsSince(dir, me, this._restoreFrom(dir, ref, me, at), got.text) };
+  }
+
+  // Where this computer's deletions are looked for, for a restore from
+  // `ref`: the version's own entry when it's this computer's; otherwise
+  // this chain's last session to end by the version's time, or its start
+  _restoreFrom(dir, ref, me, at) {
     let from = null;
     if (ref.named) {
       const v = readNamedFile(dir, ref.named);
@@ -586,7 +593,53 @@ class History {
         }
       }
     }
-    return { text: got.text, dels: this.deletionsSince(dir, me, from, got.text) };
+    return from;
+  }
+
+  // The whole book in a version (NEO Scribe's Restore Whole Book, on a
+  // named version): the book document rebuilt at the version's entry, its
+  // chapter order, titles and kinds, and every chapter in that order; or a
+  // whole-book copy's own (kinds: null, a copy doesn't keep them). A
+  // chapter whose words the version doesn't hold is left out of
+  // `chapters`. Returns { order, titles, kinds, chapters: { id: html } }
+  // or { error }.
+  versionBook(dir, ref) {
+    if (!ref) return { error: 'no such version' };
+    if (ref.named) {
+      const v = readNamedFile(dir, ref.named);
+      if (!v) return { error: 'that version isn\'t there' };
+      ref = v.copy ? { copy: v.copy } : { dev: v.dev, n: v.n, h: v.h };
+    }
+    if (ref.copy) {
+      const c = readCopy(dir, ref.copy);
+      if (!c) return { error: 'that version\'s copy can\'t be read' };
+      if (!c.all) return { error: 'that copy holds only the chapters one session changed' };
+      const held = Object.keys(c.chapters);
+      const order = [...c.order.filter((id) => id in c.chapters), ...held.filter((id) => !c.order.includes(id))];
+      return { order, titles: { ...(c.titles || {}) }, kinds: null, chapters: { ...c.chapters } };
+    }
+    if (typeof ref.dev !== 'string' || !Number.isSafeInteger(ref.n)) return { error: 'no such version' };
+    const r = this.rebuild(dir, ref.dev, ref.n, { h: ref.h || null });
+    if (r.error) return r;
+    const facts = typeof r.docs.book === 'string' ? bookFacts(r.docs.book) : null;
+    if (!facts) return { error: 'book' in r.docs ? 'the book\'s details for this version aren\'t in the log' : 'the book\'s details weren\'t logged yet then' };
+    const order = facts.order.filter((id) => typeof id === 'string');
+    const chapters = {};
+    for (const id of order) {
+      const t = r.docs[V.chapterDoc(id)];
+      if (typeof t === 'string') chapters[id] = t;
+    }
+    return { order, titles: { ...facts.titles }, kinds: { ...facts.kinds }, chapters };
+  }
+
+  // The whole book on its way back (Restore Whole Book): versionBook, and
+  // what this computer's chain deleted since, as restoreSource gives it
+  // for one chapter. Returns versionBook's answer plus `dels`, or { error }.
+  restoreBookSource(dir, ref, { me = null, at = null, logged = true } = {}) {
+    const got = this.versionBook(dir, ref);
+    if (got.error || !logged || typeof me !== 'string') return got.error ? got : { ...got, dels: [] };
+    const all = Object.values(got.chapters).join('\n');
+    return { ...got, dels: this.deletionsSince(dir, me, this._restoreFrom(dir, ref, me, at), all) };
   }
 
   // One chapter's writing played back (slog-playback.js), as data for the

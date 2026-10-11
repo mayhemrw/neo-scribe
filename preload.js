@@ -105,6 +105,7 @@ contextBridge.exposeInMainWorld('neo', {
     text: (bookId, ref, chapterId) => ipcRenderer.invoke('history:text', bookId, ref, chapterId),
     titles: (bookId, ref) => ipcRenderer.invoke('history:titles', bookId, ref),
     restore: (bookId, ref, chapterId, opts) => ipcRenderer.invoke('history:restore', bookId, ref, chapterId, opts),
+    restoreBook: (bookId, ref, opts) => ipcRenderer.invoke('history:restoreBook', bookId, ref, opts),
     playback: (bookId, chapterId, from) => ipcRenderer.invoke('history:playback', bookId, chapterId, from)
   },
 

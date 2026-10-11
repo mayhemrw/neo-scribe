@@ -1172,6 +1172,34 @@ async function historyRestore(bookId, ref, chapterId, { at = null, name = null }
   }
 }
 ipcMain.handle('history:restore', (_e, bookId, ref, chapterId, opts) => historyRestore(bookId, ref, chapterId, opts && typeof opts === 'object' ? opts : {}));
+// NEO Scribe's Restore Whole Book (a named version): every chapter's
+// words, the order, the titles and the kinds as they were then, with the
+// log made ready the way historyRestore makes it for one chapter (what
+// this computer deleted since goes to the Recorder, so restored words keep
+// their origin), and a version of the book as it stands saved first
+// (`name`). The window has saved everything first. Returns { order,
+// titles, kinds, chapters, version } or { error }.
+ipcMain.handle('history:restoreBook', async (_e, bookId, ref, opts) => {
+  const dir = bookDir(bookId);
+  const clean = historyRef(ref);
+  if (!clean) return { error: t('No such version.') };
+  const { at = null, name = null } = opts && typeof opts === 'object' ? opts : {};
+  const logged = !historyFromCopies(bookId);
+  const me = slogTap((s) => s.device()) || null;
+  try {
+    if (logged) await scribe().head(dir, bookId);
+    const got = await historyAsk({ type: 'restoreBook', dir, ref: clean, me, at: Number.isFinite(at) ? at : null, logged });
+    if (got.error) return { error: got.error };
+    for (const id of got.order) libName(id);
+    if (logged) slogTap((s) => s.restoring(dir, bookId, got.dels));
+    const clean2 = name ? slogHistory.cleanName(name) : null;
+    const version = clean2 ? await history.mark(bookId, clean2, 'restore') : null;
+    return { order: got.order, titles: got.titles, kinds: got.kinds, chapters: got.chapters, version: version ? { file: version.file, name: version.name } : null };
+  } catch (err) {
+    logError('versions', err);
+    return { error: err.message };
+  }
+});
 // One chapter's writing to play back, from a version ({ dev, n } on a
 // chain) or from its start, to the log's end: the log flushed first (the
 // window has saved everything), the playback built in the helper and
@@ -3140,6 +3168,10 @@ function buildMenu() {
           accelerator: 'CmdOrCtrl+E',
           click: () => sendToWindow({ type: 'emailDraft' })
         },
+        // NEO Scribe: ⌘S names a version after the time, no questions
+        // (shown, not registered: the window answers ⌘S itself, so it never
+        // fires twice)
+        { label: t('Save Version'), accelerator: 'CmdOrCtrl+S', registerAccelerator: false, enabled: !!slogMenu.bookId, click: () => sendToWindow({ type: 'saveVersion', bookId: slogMenu.bookId }) },
         { label: t('Name This Version…'), enabled: !!slogMenu.bookId, click: () => sendToWindow({ type: 'nameVersion', bookId: slogMenu.bookId }) },
         // the open book's log: the window flips scribesLog in book.json
         {
@@ -3161,10 +3193,8 @@ function buildMenu() {
           ]
         },
         { label: t('Email Settings…'), click: () => sendToWindow({ type: 'emailSettings' }) },
-        { type: 'separator' },
-        // shown, not registered: the window answers ⌘S itself, so it works the
-        // same in Pocket with a keyboard and never fires twice
-        { label: t('Take Snapshot'), accelerator: 'CmdOrCtrl+S', registerAccelerator: false, click: () => sendToWindow({ type: 'snapshot' }) },
+        // (NEO Scribe: no Take Snapshot here; ⌘S saves a version, below,
+        // and Chapter History holds them. Hugh's Snapshots stay off.)
         { type: 'separator' },
         { label: t('Cover Art…'), click: () => sendToWindow({ type: 'coverArt' }) },
         {
