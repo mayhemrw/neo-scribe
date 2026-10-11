@@ -20908,6 +20908,7 @@ function updateMessage(msg) {
 // Help → About NEO: the version, plainly
 async function showAbout() {
   const v = await window.neo.appVersion();
+  const base = window.neo.basedOn ? await window.neo.basedOn() : '';
   const bd = document.createElement('div');
   bd.className = 'modal-backdrop';
   bd.innerHTML = `
@@ -20915,6 +20916,7 @@ async function showAbout() {
       <h2 style="font-size:22px;letter-spacing:6px">NEO</h2>
       <p class="brand-sub">Scribe</p>
       <p class="about-version">${t('Version {version}', { version: v })}</p>
+      ${base ? `<p class="about-line">${t('Based on NEO {version} by Hugh Howey', { version: escHtml(base) })}</p>` : ''}
       <p class="about-line">${t('A word processor for authors.')}</p>
       <div style="margin-top:16px">
         <button class="m-ok btn-gold">${t('Back to writing')}</button>

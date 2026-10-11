@@ -1,7 +1,8 @@
 {
   "name": "neo",
   "productName": "NEO Scribe",
-  "version": "1.5.0",
+  "version": "1.0.0-beta.1",
+  "basedOnNeo": "1.5.0",
   "description": "A word processor for authors. Distraction-free by default.",
   "homepage": "https://github.com/mayhemrw/neo-scribe",
   "main": "main.js",
@@ -101,7 +102,7 @@
           "Keywords": "writing;writer;novel;book;author;manuscript;wordprocessor;"
         }
       },
-      "maintainer": "Hugh Howey <hughhowey@gmail.com>"
+      "maintainer": "Ryan Mahan <contact@prometheanbooks.com>"
     },
     "nsis": {
       "oneClick": true,

@@ -1,4 +1,4 @@
-# Builds NEO on remote Windows, Linux, and macOS machines whenever a version
+# Builds NEO Scribe on remote Windows, Linux, and macOS machines whenever a version
 # tag is pushed, and attaches the installers to a draft GitHub release. 
 
 name: Build NEO
@@ -96,10 +96,23 @@ jobs:
         with:
           node-version: 20
       - run: npm install
+      # Signed and notarized only when the Apple secrets are set (CSC_LINK,
+      # CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD,
+      # APPLE_TEAM_ID). Without them the app is ad-hoc signed (so Apple
+      # silicon runs it at all) and not notarized: on first open macOS
+      # blocks it until the writer chooses System Settings → Privacy &
+      # Security → Open Anyway, and it can't update itself.
+      - name: Is there an Apple signing certificate?
+        id: signing
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+        run: |
+          if [ -n "$CSC_LINK" ]; then echo "signed=yes" >> "$GITHUB_OUTPUT"; else echo "signed=no" >> "$GITHUB_OUTPUT"; echo "::notice::No Apple certificate: building an unsigned (ad-hoc) Mac app."; fi
       # electron-builder's own temp-keychain handling is flaky on current
       # macOS runners — set the keychain up explicitly and let codesign
       # discover the identity from it
       - name: Import signing certificate
+        if: steps.signing.outputs.signed == 'yes'
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
@@ -115,11 +128,25 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
           rm "$RUNNER_TEMP/neo-cert.p12"
       - name: Build, sign, and notarize
+        if: steps.signing.outputs.signed == 'yes'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npx electron-builder --mac --publish never
+      - name: Build unsigned (ad-hoc)
+        if: steps.signing.outputs.signed != 'yes'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          node -e "const f='package.json',p=require('./'+f);p.build.mac.identity='-';p.build.mac.notarize=false;require('fs').writeFileSync(f,JSON.stringify(p,null,2))"
+          npx electron-builder --mac --publish never
+      # an ad-hoc app that doesn't verify is the "damaged" message on Apple silicon
+      - name: The app's signature checks
+        run: |
+          app=$(ls -d dist/mac*/*.app | head -1)
+          echo "Checking $app"
+          codesign --verify --deep --strict --verbose=2 "$app"
       - uses: actions/upload-artifact@v4
         with:
           name: mac-build
@@ -135,7 +162,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --draft --title "NEO $GITHUB_REF_NAME"
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --draft --title "NEO Scribe $GITHUB_REF_NAME"
           gh release upload "$GITHUB_REF_NAME" dist/*.dmg dist/*-mac.zip dist/latest-mac.yml dist/*.blockmap --clobber
 
   linux:

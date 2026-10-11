@@ -224,6 +224,8 @@ The window is created with `contextIsolation: true` and `nodeIntegration: false`
 
 ## Files on disk
 
+**Versions:** NEO Scribe numbers its own releases (`version` in package.json, from `1.0.0-beta.1`; `npm run release` goes beta to beta, `npm run release -- 1.0.0` leaves beta). `basedOnNeo` in package.json is the version of Hugh's NEO it's built on, shown in About as "Based on NEO 1.5.0 by Hugh Howey": raise it with every merge of his updates, and keep NEO Scribe's own `version` when package.json conflicts. Releases are published as ordinary (not pre-) releases, so `releases/latest` and the updater find them. Without Apple's secrets the Mac app is ad-hoc signed and not notarized (build.yml): testers open it with System Settings → Privacy & Security → Open Anyway, and it can't update itself.
+
 Default library: `~/Documents/NEO Scribe Library` (`app.getPath('documents')`, `LIBRARY_NAME` in `main.js`). NEO Scribe is its own app beside Hugh's NEO: its own appId (`com.prometheanbooks.neoscribe`), name (so its own `userData` and device id) and library folder, so the two never share books, settings or a Scribe's Log device. Inside the app it's still called NEO; only the window title, the shelf, About and the welcome say NEO Scribe. **File → Library Folder…** stores another path in `userData/settings.json` and restarts. NEO does not move existing books.
 
 ```

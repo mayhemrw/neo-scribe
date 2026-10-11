@@ -1275,7 +1275,7 @@ function slogReadme(kind, m) {
 // The checker from this NEO: one page with the checker's own files inside
 // it (verifier/build.js), built from them each time so it can't fall behind
 function slogVerifierPage() {
-  try { return require('./verifier/build.js').buildVerifier({ version: app.getVersion(), built: 'built with NEO ' + app.getVersion() }); } catch (err) { logError('scribe\'s log verifier', err); }
+  try { return require('./verifier/build.js').buildVerifier({ version: app.getVersion(), built: 'built with NEO Scribe ' + app.getVersion() }); } catch (err) { logError('scribe\'s log verifier', err); }
   return '<!doctype html><meta charset="utf-8"><title>Scribe\'s Log verifier</title>' +
     '<body style="font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em">' +
     '<h1>Scribe\'s Log verifier</h1><p>This copy of NEO couldn\'t build its verifier page, so this export doesn\'t carry one. ' +
@@ -1447,7 +1447,7 @@ async function slogReportHtml(dir, meta, privacy, editorNames = null) {
   try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { /* UTC */ }
   return R.renderReport(stats, {
     privacy, tz, locale: NeoI18n.getLocale(), t, canShow: slogCanShow(), editorNames,
-    generator: 'NEO ' + app.getVersion(), generated: Date.now()
+    generator: 'NEO Scribe ' + app.getVersion(), generated: Date.now()
   });
 }
 // A PDF of the report's page, on the paper this computer's region uses
@@ -3700,12 +3700,27 @@ function watchEditMenu() {
 // lookup, separate from the silent auto-updater. Works in dev builds too.
 let lastReleaseUrl = null;
 
+// Semantic versions, prereleases included: 1.0.0-beta.2 is newer than
+// 1.0.0-beta.1 and older than 1.0.0 (NEO Scribe numbers its betas that way).
 function compareVersions(a, b) {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] || 0, nb = pb[i] || 0;
+  const split = (v) => {
+    const [core, pre] = String(v || '').replace(/^v/, '').split('+')[0].split(/-(.*)/s);
+    return { core: core.split('.').map((n) => Number(n) || 0), pre: pre ? pre.split('.') : [] };
+  };
+  const pa = split(a), pb = split(b);
+  for (let i = 0; i < Math.max(pa.core.length, pb.core.length); i++) {
+    const na = pa.core[i] || 0, nb = pb.core[i] || 0;
     if (na !== nb) return na - nb;
+  }
+  if (!pa.pre.length || !pb.pre.length) return pb.pre.length - pa.pre.length; // a release beats its betas
+  for (let i = 0; i < Math.max(pa.pre.length, pb.pre.length); i++) {
+    const x = pa.pre[i], y = pb.pre[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const nx = /^\d+$/.test(x), ny = /^\d+$/.test(y);
+    if (nx && ny && Number(x) !== Number(y)) return Number(x) - Number(y);
+    if (nx !== ny) return nx ? -1 : 1;
+    if (!nx && x !== y) return x < y ? -1 : 1;
   }
   return 0;
 }
@@ -3713,6 +3728,10 @@ function compareVersions(a, b) {
 // toggling at the session level forces the engine to re-scan visible text —
 // newer Chromium ignores attribute changes on text it has already looked at
 ipcMain.handle('app:version', () => app.getVersion());
+// the version of Hugh's NEO this build is based on (package.json's basedOnNeo;
+// raise it with each merge of his updates)
+const BASED_ON_NEO = (() => { try { return require('./package.json').basedOnNeo || ''; } catch { return ''; } })();
+ipcMain.handle('app:basedOn', () => BASED_ON_NEO);
 // Help → How-To Guide… and Help → FAQ…: the guides that ship with NEO,
 // read from its own folder (never the library), by name only
 ipcMain.handle('help:guide', (_e, name) => {
@@ -3885,6 +3904,12 @@ app.whenReady().then(() => {
         applicationVersion: app.getVersion(),
         iconPath: devIcon
       });
+    }
+  } catch { /* cosmetic only */ }
+  // the Mac's own About panel: which NEO this is built on
+  try {
+    if (process.platform === 'darwin' && BASED_ON_NEO) {
+      app.setAboutPanelOptions({ applicationName: 'NEO Scribe', applicationVersion: app.getVersion(), credits: t('Based on NEO {version} by Hugh Howey', { version: BASED_ON_NEO }) });
     }
   } catch { /* cosmetic only */ }
   // Startup discipline: the window is created first, and every other step is
