@@ -226,7 +226,7 @@ function writeLibrary(lib = library) {
 // library's copy is the last device's, so a device opening the library for
 // the first time starts out the way the writer last had it, and from then on
 // keeps its own.
-const DEVICE_LOOK = ['pageTheme', 'uiBright', 'uiBrightAside', 'uiZoom', 'editorFontSize', 'typewriter', 'focus', 'posMode', 'outlineView', 'vimKeys'];
+const DEVICE_LOOK = ['pageTheme', 'uiBright', 'uiBrightAside', 'uiZoom', 'editorFontSize', 'typewriter', 'focus', 'posMode', 'outlineView', 'vimKeys', 'findCase', 'findWord', 'findTitles', 'findDock'];
 const DEVICE_LOOK_KEY = 'neo-device-look';
 function deviceLookOf(lib) {
   const out = {};
@@ -7169,6 +7169,7 @@ function markCurrentSticky(sid) {
 }
 
 function focusSticky(sid) {
+  if (findList.open && findDocked()) toggleFindList(false); // a note needs its pane back
   $('#side-pane').classList.add('open');
   const el = document.querySelector(`.sticky[data-sid="${sid}"] textarea`);
   if (!el) return;
@@ -9822,8 +9823,10 @@ function beginCardDrag(st) {
   st.float = float;
   st.src.cell.classList.add('ob-lifted');
   document.body.classList.add('ob-dragging');
-  // the loose pane opens to take a card
+  // the loose pane opens to take a card (not while Find's list is docked
+  // over it: the loose cards are out of sight then)
   const c = st.src.cell;
+  if ($('#side-pane').classList.contains('find-docked')) return;
   if ((st.src.kind === 'section' && (c.dataset.written || c.dataset.sec)) || st.src.kind === 'scene' ||
       (st.src.kind === 'chapter' && canSetChapterAside(c.dataset.ch))) $('#side-pane').classList.add('drop-ready');
 }
@@ -12149,6 +12152,7 @@ setInterval(() => { if (book) flushAllSaves('tick'); }, 20000);
 
 async function backToShelf() {
   if (reading) stopReadAloud(false);
+  if (!$('#searchbar').hidden) closeSearch(); // its hits were this book's
   flushAllSaves();
   tabPlaces = {};
   book = null;
@@ -12654,12 +12658,14 @@ function openSearch(fromVim = false) {
   $('#searchbar').hidden = false;
   const inp = $('#search-input');
   if (preset) inp.value = preset;
+  findShowClears();
   inp.focus();
   inp.select();
   runSearch();
 }
 
 function closeSearch() {
+  if (findList.open) toggleFindList(false); // a docked list gives Notes back
   $('#searchbar').hidden = true;
   searchState = { matches: [], idx: -1, query: '' };
   searchFromVim = false;
@@ -12702,53 +12708,169 @@ function paintHighlights() {
 }
 
 // Find searches the tab you're in: the whole manuscript, first chapter to
-// last, or the Notes page, the outline's lines, the Darlings. Replace stays
-// with the manuscript, where ⌘Z can take a Replace All back.
+// last (each chapter's title first, when Include chapter titles is on), or
+// the Notes page, the outline's lines, the Darlings. Replace stays with the
+// manuscript, where ⌘Z can take a Replace All back.
 function searchRoots() {
-  if (currentTab === 'manuscript') return book.chapterOrder.map((chId) => document.querySelector(`.chapter[data-id="${chId}"] .chapter-body`));
+  if (currentTab === 'manuscript') {
+    const titles = findOpts().titles;
+    return book.chapterOrder.flatMap((chId) => {
+      const sec = document.querySelector(`.chapter[data-id="${chId}"]`);
+      if (!sec) return [];
+      const title = titles ? sec.querySelector('.chapter-head .ch-title') : null;
+      return title ? [title, sec.querySelector('.chapter-body')] : [sec.querySelector('.chapter-body')];
+    });
+  }
   if (currentTab === 'outline') return boardShowing() ? $$('#outline-board .ob-text, #loose-list .ob-text') : $$('#outline-list .ol-text');
   if (currentTab === 'darlings') return $$('#darlings-list .darling > :first-child');
   return [$('#aux-editor')];
 }
 
-// every place q appears in the tab, in reading order, any case
-function findRanges(q) {
+// Find's options, kept per device (DEVICE_LOOK): Match case, Whole word,
+// and Include chapter titles (the manuscript only)
+const findOpts = () => ({ matchCase: !!(library && library.findCase), wholeWord: !!(library && library.findWord), titles: !!(library && library.findTitles) });
+
+// The pattern a search looks for: the words as typed (no regular
+// expressions), any case unless Match case. With Whole word, not inside a
+// longer word: a letter, digit or mark on either side makes it part of
+// one, and so does an apostrophe joining two ("don" isn't found in
+// "don't"); a hyphen or a dash ends a word.
+const FIND_WORD = '[\\p{L}\\p{N}\\p{M}]';
+function findPattern(q, { matchCase = false, wholeWord = false } = {}) {
+  if (!q) return null;
+  let src = q.replace(/[\\^$.*+?()[\]{}|/]/g, '\\$&');
+  if (wholeWord) src = `(?<!${FIND_WORD})(?<!${FIND_WORD}['’])${src}(?!${FIND_WORD})(?!['’]${FIND_WORD})`;
+  return new RegExp(src, matchCase ? 'gu' : 'giu');
+}
+// where a pattern is found in a text: [[start, end], …], none overlapping
+function findIn(text, re) {
+  const out = [];
+  if (!re) return out;
+  re.lastIndex = 0;
+  for (let m; (m = re.exec(text));) {
+    if (!m[0].length) { re.lastIndex++; continue; }
+    out.push([m.index, m.index + m[0].length]);
+  }
+  return out;
+}
+
+// A root's text as Find reads it: each paragraph's text as one string,
+// with where each of its text nodes starts in it, so a phrase is found
+// whatever inline formatting it crosses ("the <i>old</i> house"). A new
+// paragraph or a line break (<br>) starts a new stretch, so nothing is
+// found across one. [{ text, nodes: [{ node, at }], root }]
+const FIND_BLOCKS = new Set(['P', 'LI', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'TD', 'TH', 'SECTION']);
+function findBlocks(root) {
+  const out = [];
+  if (!root) return out;
+  let cur = null;
+  let curBlock = null;
+  const blockOf = (n) => {
+    for (let e = n.parentElement; e && e !== root; e = e.parentElement) if (FIND_BLOCKS.has(e.tagName)) return e;
+    return root;
+  };
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (n.nodeType !== Node.TEXT_NODE) { if (n.tagName === 'BR') cur = null; continue; }
+    const b = blockOf(n);
+    if (!cur || b !== curBlock) { cur = { text: '', nodes: [], root }; out.push(cur); curBlock = b; }
+    cur.nodes.push({ node: n, at: cur.text.length });
+    cur.text += n.data;
+  }
+  return out;
+}
+// The inline styles a text node carries within its paragraph, as a key
+// ("bi" for bold italic): tags and the engine's style attributes alike
+const FIND_STYLE_TAGS = { B: 'b', STRONG: 'b', I: 'i', EM: 'i', U: 'u', S: 's', STRIKE: 's', DEL: 's' };
+function findStyleOf(node, root) {
+  const k = new Set();
+  for (let e = node.parentElement; e && e !== root && !FIND_BLOCKS.has(e.tagName); e = e.parentElement) {
+    if (FIND_STYLE_TAGS[e.tagName]) k.add(FIND_STYLE_TAGS[e.tagName]);
+    const st = e.getAttribute('style') || '';
+    if (/font-style\s*:\s*italic/i.test(st)) k.add('i');
+    if (/font-weight\s*:\s*(?:bold|[6-9]00)/i.test(st)) k.add('b');
+    if (/text-decoration[^;]*underline/i.test(st)) k.add('u');
+    if (/text-decoration[^;]*line-through/i.test(st)) k.add('s');
+  }
+  return [...k].sort().join('');
+}
+// One match in a stretch as a Range over its text nodes, with the nodes
+// it covers and whether it crosses formatting (part of it styled
+// differently from the rest)
+function findMatchAt(block, s, e) {
+  const { nodes } = block;
+  let i = 0;
+  while (i < nodes.length - 1 && nodes[i + 1].at <= s) i++;
+  let j = i;
+  while (j < nodes.length - 1 && nodes[j + 1].at < e) j++;
+  const range = document.createRange();
+  range.setStart(nodes[i].node, s - nodes[i].at);
+  range.setEnd(nodes[j].node, e - nodes[j].at);
+  let crosses = false;
+  if (j > i) {
+    const styles = new Set();
+    for (let k = i; k <= j; k++) {
+      const n = nodes[k];
+      if (n.at + n.node.data.length > s && n.at < e) styles.add(findStyleOf(n.node, block.root));
+    }
+    crosses = styles.size > 1;
+  }
+  return { range, block, from: i, to: j, start: s, end: e, crosses };
+}
+
+// Every place q is found in the tab, in reading order: [{ range, chId,
+// title (a chapter's title), crosses, block, from, to, start, end }]
+function findMatches(q) {
   const found = [];
-  if (!q) return found;
-  const ql = q.toLowerCase();
-  for (const body of searchRoots()) {
-    if (!body) continue;
-    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-      const tl = node.textContent.toLowerCase();
-      let pos = 0;
-      while ((pos = tl.indexOf(ql, pos)) !== -1) {
-        const range = document.createRange();
-        range.setStart(node, pos);
-        range.setEnd(node, pos + q.length);
-        found.push(range);
-        pos += q.length;
-      }
+  const re = findPattern(q, findOpts());
+  if (!re) return found;
+  for (const root of searchRoots()) {
+    if (!root) continue;
+    const sec = root.closest && root.closest('.chapter');
+    const chId = sec ? sec.dataset.id : null;
+    const title = root.classList.contains('ch-title');
+    for (const block of findBlocks(root)) {
+      for (const [s, e] of findIn(block.text, re)) found.push({ ...findMatchAt(block, s, e), chId, title });
     }
   }
   return found;
+}
+// …as ranges alone (vim's n and N)
+const findRanges = (q) => findMatches(q).map((m) => m.range);
+
+// The bar's three options: pressed or not, as kept; titles only in the manuscript
+function showFindOpts() {
+  const o = findOpts();
+  $('#find-case').setAttribute('aria-pressed', String(o.matchCase));
+  $('#find-word').setAttribute('aria-pressed', String(o.wholeWord));
+  $('#find-titles').setAttribute('aria-pressed', String(o.titles));
+  $('#find-titles').hidden = currentTab !== 'manuscript';
+}
+function toggleFindOpt(key) {
+  library[key] = !library[key];
+  writeLibrary(library);
+  showFindOpts();
+  runSearch();
+  $('#search-input').focus();
 }
 
 // Scan the whole tab every time. Matches are highlighted, not selected.
 function runSearch() {
   const q = $('#search-input').value;
-  searchState = { matches: [], idx: -1, query: q, tab: currentTab };
+  searchState = { matches: [], idx: -1, query: q, tab: currentTab, opts: JSON.stringify(findOpts()) };
   $('#searchbar').classList.toggle('find-only', currentTab !== 'manuscript');
+  showFindOpts();
   if (!q) {
     $('#search-count').textContent = '';
     paintHighlights();
+    renderFindList();
     return;
   }
-  searchState.matches = findRanges(q).map((range) => ({ range }));
+  searchState.matches = findMatches(q);
   const n = searchState.matches.length;
   $('#search-count').textContent = n ? t('{n} found', { n }) : t('none');
   paintHighlights();
+  renderFindList();
 }
 
 // only runs when the user asks (Enter / arrows)
@@ -12759,81 +12881,718 @@ function gotoMatch(i) {
   paintHighlights();
   try {
     const rect = m[searchState.idx].range.getBoundingClientRect();
-    $('#paper-scroll').scrollTop += rect.top - window.innerHeight * 0.45;
+    $('#paper-scroll').scrollTop += rect.top - findHitTop(m[searchState.idx]);
   } catch { /* range collapsed by an edit; next search rebuilds */ }
   $('#search-count').textContent = t('{i} of {n}', { i: searchState.idx + 1, n: m.length });
+  findListFollow();
+}
+
+// Where a hit gone to lands in the window: two lines below the results
+// list while it's open under the bar (so the list never covers it), else a
+// little above the middle
+function findHitTop(m) {
+  const list = $('#find-results');
+  if (!list || list.hidden || list.classList.contains('docked')) return window.innerHeight * 0.45;
+  let line = 28;
+  try {
+    const n = m.range.startContainer;
+    const cs = getComputedStyle(n.nodeType === Node.TEXT_NODE ? n.parentElement : n);
+    line = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.6 || line;
+  } catch { /* the default */ }
+  return list.getBoundingClientRect().bottom + line * 2;
 }
 
 function freshSearchIfStale() {
-  if (searchState.query !== $('#search-input').value || searchState.tab !== currentTab) runSearch();
+  if (searchState.query !== $('#search-input').value || searchState.tab !== currentTab || searchState.opts !== JSON.stringify(findOpts())) runSearch();
 }
 
-function replaceCurrent() {
+// ---- Replacing. Replace and Replace All stay in the manuscript (and its
+// chapter titles, when Include chapter titles is on). A hit that crosses
+// formatting ("the <i>old</i> house") is never replaced blind: Replace All
+// leaves it for the writer, and the list (or Replace, asking) puts it in
+// one of two ways: Keep formatting (each new word takes the formatting of
+// the word it replaces; the formatting where the hit starts when the
+// counts differ) or Plain (no bold, italic, underline or strikethrough;
+// the paragraph's own style stays).
+
+// [s, e) of a stretch replaced by rep, in the formatting of the text where
+// it starts: the first text node takes the new words, the rest of the
+// stretch is trimmed away. Several in one stretch go from the last back.
+// Returns where the new words end: { node, at }.
+function findSplice(block, s, e, rep) {
+  const { nodes } = block;
+  let i = 0;
+  while (i < nodes.length - 1 && nodes[i + 1].at <= s) i++;
+  let j = i;
+  while (j < nodes.length - 1 && nodes[j + 1].at < e) j++;
+  const a = nodes[i];
+  const z = nodes[j];
+  const a0 = s - a.at;
+  const z1 = e - z.at;
+  if (i === j) a.node.data = a.node.data.slice(0, a0) + rep + a.node.data.slice(z1);
+  else {
+    z.node.data = z.node.data.slice(z1);
+    for (let x = j - 1; x > i; x--) nodes[x].node.data = '';
+    a.node.data = a.node.data.slice(0, a0) + rep;
+  }
+  return { node: a.node, at: a0 + rep.length };
+}
+// an element that styles the words inside it (as findStyleOf reads them)
+function findStyled(el) {
+  if (FIND_STYLE_TAGS[el.tagName]) return true;
+  const st = el.getAttribute('style') || '';
+  return /font-style\s*:\s*italic|font-weight\s*:\s*(?:bold|[6-9]00)|text-decoration[^;]*(?:underline|line-through)/i.test(st);
+}
+// the paragraph a node sits in, within a root Find searched
+function findParaOf(node, root) {
+  for (let e = node.parentElement; e && e !== root; e = e.parentElement) if (FIND_BLOCKS.has(e.tagName)) return e;
+  return root;
+}
+// Keep formatting: word by word when the counts match, else all of it in
+// the formatting where the hit starts
+function findReplaceKeep(m, rep) {
+  const old = m.block.text.slice(m.start, m.end);
+  const words = [...old.matchAll(/\S+/g)].map((x) => [m.start + x.index, m.start + x.index + x[0].length]);
+  const neu = rep.match(/\S+/g) || [];
+  if (m.crosses && words.length > 1 && neu.length === words.length) {
+    for (let k = words.length - 1; k >= 0; k--) findSplice(m.block, words[k][0], words[k][1], neu[k]);
+  } else findSplice(m.block, m.start, m.end, rep);
+}
+// Plain: the hit taken out, and the new words put in outside every inline
+// style around that point (the styled element is split in two there)
+function findReplacePlain(m, rep) {
+  const { node, at } = findSplice(m.block, m.start, m.end, '');
+  if (!rep) return;
+  let top = null;
+  for (let el = node.parentElement; el && el !== m.block.root && !FIND_BLOCKS.has(el.tagName); el = el.parentElement) {
+    if (findStyled(el)) top = el;
+  }
+  const text = document.createTextNode(rep);
+  if (!top) { node.parentNode.insertBefore(text, node.splitText(at)); return; }
+  const r = document.createRange();
+  r.setStart(node, at);
+  r.setEndAfter(top);
+  const tail = r.extractContents();
+  top.after(tail);
+  top.after(text);
+}
+// styled elements a replacement emptied go (never a mark NEO keeps there)
+function findTidy(para) {
+  const empty = [...para.querySelectorAll('b, strong, i, em, u, s, strike, del, span[style]:not([class]):not([data-sid])')].reverse();
+  for (const el of empty) if (!el.textContent && !el.querySelector('br, img')) el.remove();
+}
+// a hit is still what was found, where it was found: in the page, its
+// stretch's text unchanged since the search (the replacement goes in by
+// those offsets, so an edit earlier in the paragraph makes it stale), and
+// the words still matching
+function findStillThere(m) {
+  if (!m || !m.range.startContainer.isConnected || !m.range.endContainer.isConnected) return false;
+  if (m.block.nodes.some((n) => !n.node.isConnected) || m.block.nodes.map((n) => n.node.data).join('') !== m.block.text) return false;
+  const text = m.range.toString();
+  const again = findIn(text, findPattern(String(searchState.query || ''), { matchCase: findOpts().matchCase }));
+  return again.length === 1 && again[0][0] === 0 && again[0][1] === text.length;
+}
+
+// The hits asked for, as Find finds them now: when the page changed under
+// any of them, the tab is searched again and each is found again where its
+// (live) range now starts. Those no longer there are dropped.
+function findFresh(ms) {
+  if (ms.every(findStillThere)) return ms;
+  const starts = ms.filter((m) => m && m.range.startContainer.isConnected).map((m) => m.range.cloneRange());
+  const idx = searchState.idx;
+  runSearch();
+  const out = [];
+  for (const r of starts) {
+    const m = searchState.matches.find((x) => {
+      try { return x.range.compareBoundaryPoints(Range.START_TO_START, r) === 0; } catch { return false; }
+    });
+    if (m && !out.includes(m)) out.push(m);
+  }
+  if (idx >= 0 && searchState.matches.length) searchState.idx = Math.min(idx, searchState.matches.length - 1);
+  return out;
+}
+
+// Hits replaced as one undoable step (label: 'replace' or 'replace all').
+// how: 'keep' or 'plain', for those that cross formatting. A title is kept
+// in book.chapterTitles as its own edit would. Returns how many were
+// replaced.
+function replaceHits(ms, how, label) {
+  if (currentTab !== 'manuscript' || !book) return 0; // Replace stays in the manuscript
+  const rep = $('#replace-input').value;
+  const live = ms.filter(findStillThere);
+  if (!live.length) return 0;
+  snapshotStructure(label);
+  const byBlock = new Map();
+  for (const m of live) {
+    if (!byBlock.has(m.block)) byBlock.set(m.block, []);
+    byBlock.get(m.block).push(m);
+  }
+  const chapters = new Set();
+  const titles = new Set();
+  for (const [block, hits] of byBlock) {
+    hits.sort((a, b) => b.start - a.start);
+    const para = findParaOf(block.nodes[0].node, block.root);
+    for (const m of hits) {
+      if (m.crosses && how === 'plain') findReplacePlain(m, rep);
+      else findReplaceKeep(m, rep);
+    }
+    findTidy(para);
+    (hits[0].title ? titles : chapters).add(hits[0].chId);
+  }
+  for (const chId of chapters) {
+    const body = document.querySelector(`.chapter[data-id="${chId}"] .chapter-body`);
+    if (body) syncChapter(body, chId);
+  }
+  if (titles.size) {
+    book.chapterTitles = book.chapterTitles || {};
+    for (const chId of titles) {
+      const span = document.querySelector(`.chapter[data-id="${chId}"] .ch-title`);
+      if (!span) continue;
+      book.chapterTitles[chId] = span.textContent.trim();
+      span.closest('.chapter-head').classList.toggle('has-title', !!book.chapterTitles[chId]);
+    }
+    saveMeta();
+    renderNav();
+  }
+  breakRun++; // the engine never saw these changes: ⌘Z goes to NEO's undo
+  return live.length;
+}
+
+// Replace (the bar's, or Enter in Replace with): the hit gone to, or the
+// first. One that crosses formatting asks how.
+async function findAskHow(n) {
+  const ask = optionModal(escHtml(n === 1 ? t('This one has mixed formatting') : t('These have mixed formatting')),
+    escHtml(t('How should the new words go in?')), [
+      { label: escHtml(t('Keep formatting')), desc: escHtml(t('Each new word takes the formatting of the word it replaces.')), value: 'keep' },
+      { label: escHtml(t('Plain')), desc: escHtml(t('No bold, italic, underline or strikethrough. The paragraph’s own style stays.')), value: 'plain' }
+    ]);
+  const first = [...document.querySelectorAll('.modal-backdrop .fr-choice')].pop();
+  if (first) first.parentElement.querySelector('.fr-choice').focus();
+  return ask;
+}
+async function replaceCurrent() {
   if (currentTab !== 'manuscript') return;
   freshSearchIfStale();
   if (!searchState.matches.length) { toast(t('No matches')); return; }
   if (searchState.idx < 0) searchState.idx = 0; // start from the very first match
-  const m = searchState.matches[searchState.idx];
-  const rep = $('#replace-input').value;
-  // the match may have been edited away by hand since it was found: look
-  // again rather than put the replacement where it no longer is
-  if (m.range.toString().toLowerCase() !== String(searchState.query || '').toLowerCase()) { runSearch(); return; }
-  let chapter = null;
-  try {
-    chapter = m.range.startContainer.parentElement.closest('.chapter');
-    snapshotStructure('replace');
-    breakRun++; // the engine never saw this change: ⌘Z goes to NEO's undo
-    m.range.deleteContents();
-    if (rep) m.range.insertNode(document.createTextNode(rep));
-  } catch {
-    runSearch();
-    return;
+  // the page may have changed since the search: the hit is found again
+  // where it now is (or, edited away, not replaced at all)
+  let m = findFresh([searchState.matches[searchState.idx]])[0];
+  if (!m) { toast(t('That one changed since it was found: look again.'), 4000); return; }
+  searchState.idx = searchState.matches.indexOf(m);
+  let how = 'keep';
+  if (m.crosses) {
+    how = await findAskHow(1);
+    $('#search-input').focus({ preventScroll: true });
+    if (!how) return;
+    m = findFresh([m])[0];
+    if (!m || currentTab !== 'manuscript') return;
   }
-  if (chapter) syncChapter(chapter.querySelector('.chapter-body'), chapter.dataset.id);
   const oldIdx = searchState.idx;
+  if (!replaceHits([m], how, 'replace')) { runSearch(); return; }
   runSearch();
   if (searchState.matches.length) gotoMatch(Math.min(oldIdx, searchState.matches.length - 1));
 }
 
-// Every chapter, front to back
+// A hit in the list that crosses formatting, decided (k: its row), or all
+// of them at once (the heading's buttons): one undoable step either way
+function findDecide(k, how) {
+  if (currentTab !== 'manuscript') return;
+  const r = findList.rows[k];
+  const ms = findFresh(r && r.head === 'crosses' ? searchState.matches.filter((m) => m.crosses) : r && r.cross ? [searchState.matches[r.i]] : [])
+    .filter((m) => m.crosses);
+  if (!ms.length) return;
+  const n = replaceHits(ms, how, ms.length > 1 ? 'replace all' : 'replace');
+  runSearch();
+  if (!n) return;
+  if (ms.length > 1) {
+    toast((how === 'plain' ? t('{n} replaced, as plain text.', { n }) : t('{n} replaced, keeping their formatting.', { n })) + ' ' + t('{key} to undo.', { key: KZ }), 6000);
+  }
+  // the list stays where it was, on the next hit
+  if (findList.open) {
+    const at = findListStep(Math.min(k, findList.rows.length) - 1, 1);
+    if (at >= 0) findListPlace(at);
+  }
+}
+
+// Replace All: every chapter, front to back, as Find finds them (Match
+// case, Whole word, titles when included), as one step ⌘Z takes back.
+// Hits that cross formatting are left for the writer and the list opens
+// on them.
 function replaceAllMatches() {
   const q = $('#search-input').value;
-  if (!q || currentTab !== 'manuscript') return;
-  snapshotStructure('replace all');
-  const rep = $('#replace-input').value;
-  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-  let n = 0;
-  for (const chId of book.chapterOrder) {
-    const body = document.querySelector(`.chapter[data-id="${chId}"] .chapter-body`);
-    if (!body) continue;
-    const nodes = [];
-    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) nodes.push(node);
-    let touched = false;
-    for (const nd of nodes) {
-      if (nd.textContent.toLowerCase().includes(q.toLowerCase())) {
-        nd.textContent = nd.textContent.replace(re, () => { n++; return rep; });
-        touched = true;
-      }
-    }
-    if (touched) syncChapter(body, chId);
-  }
-  if (n === 0) undoStack.pop(); // nothing changed, nothing to undo
-  else breakRun++; // ⌘Z from inside the text reaches this undo too
-  toast(n ? t('{n} replaced across the whole book — {key} to undo', { n, key: KZ }) : t('0 replaced'));
+  if (!q || currentTab !== 'manuscript' || !book) return;
   runSearch();
+  const ms = searchState.matches.filter((m) => !m.crosses);
+  const left = searchState.matches.length - ms.length;
+  const inTitles = ms.filter((m) => m.title).length;
+  const n = replaceHits(ms, 'keep', 'replace all');
+  if (!n && !left) toast(t('0 replaced'));
+  else if (!left && !inTitles) toast(t('{n} replaced across the whole book — {key} to undo', { n, key: KZ }));
+  else {
+    const parts = [n ? t('{n} replaced across the whole book', { n }) + (inTitles ? ' ' + t('({n} in chapter titles)', { n: inTitles }) : '') + '.' : t('0 replaced.')];
+    if (left) parts.push(t('{n} left: mixed formatting (see the list).', { n: left }));
+    if (n) parts.push(t('{key} to undo.', { key: KZ }));
+    toast(parts.join(' '), left ? 8000 : undefined);
+  }
+  runSearch();
+  if (left) findShowCrossing();
+}
+// the list opened (or kept) on the hits that cross formatting
+function findShowCrossing() {
+  if (!findList.open) toggleFindList(true);
+  const sc = $('#find-results .fr-scroll');
+  if (sc) sc.scrollTop = 0;
+  const k = findListStep(-1, 1);
+  if (k >= 0) findListPlace(k);
+}
+
+// ---- The results list: every hit in context, grouped by chapter, in a
+// panel below the bar or docked in the right-hand pane over Notes &
+// Comments. Hidden until the bar's List button asks for it; where it was
+// last (below or docked) is kept per device (library.findDock).
+
+const findList = { open: false, rows: [], tops: [], total: 0, rowOf: [], cursor: -1, key: '', sideWas: null };
+// rows have fixed heights, so a long book's 5,000 hits draw only what's on
+// screen: a hit is one line below the bar, three in the narrower pane
+const FIND_ROW_H = { head: 30, hit: 26, hitDocked: 60 };
+const FIND_CONTEXT = 40;
+const findDocked = () => !!(library && library.findDock) && !NO_HOVER;
+
+// A hit's line: up to n characters each side of it, cut at a space where
+// there is one so no word is halved; before and after say whether the
+// paragraph goes on past the cut (an … there).
+function findContext(text, s, e, n = FIND_CONTEXT) {
+  let a = Math.max(0, s - n);
+  let z = Math.min(text.length, e + n);
+  if (a > 0) {
+    const cut = text.slice(a, s).search(/\s/);
+    if (cut >= 0 && cut < s - a - 1) a += cut + 1;
+  }
+  if (z < text.length) {
+    const cut = text.slice(e, z).search(/\s\S*$/);
+    if (cut > 0) z = e + cut;
+  }
+  return { a, z, before: a > 0, after: z < text.length };
+}
+
+// The list's rows, heads and hits, from Find's matches. In the manuscript
+// the hits that cross formatting come first, under their own head (the
+// writer decides those), then each chapter's under its heading, a title's
+// hit first as Find finds it. Elsewhere one head holds them all.
+// [{ head: 'crosses' | 'chapter' | 'tab', chId, n } | { i, cross }]
+function findRows(matches, manuscript) {
+  const rows = [];
+  if (!matches.length) return rows;
+  if (!manuscript) {
+    rows.push({ head: 'tab', n: matches.length });
+    matches.forEach((m, i) => rows.push({ i }));
+    return rows;
+  }
+  const cross = [];
+  matches.forEach((m, i) => { if (m.crosses) cross.push(i); });
+  if (cross.length) {
+    rows.push({ head: 'crosses', n: cross.length });
+    for (const i of cross) rows.push({ i, cross: true });
+  }
+  let head = null;
+  matches.forEach((m, i) => {
+    if (m.crosses) return;
+    if (!head || head.chId !== m.chId) { head = { head: 'chapter', chId: m.chId, n: 0 }; rows.push(head); }
+    head.n++;
+    rows.push({ i });
+  });
+  return rows;
+}
+
+// The rows to draw for where the list is scrolled: from the row at the
+// top of the view to the last one in it, and a few more each side.
+// tops[k] is row k's top; [from, to) in rows.
+function findWindow(tops, scrollTop, height, extra = 8) {
+  if (!tops.length) return [0, 0];
+  let lo = 0;
+  let hi = tops.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (tops[mid] <= scrollTop) lo = mid;
+    else hi = mid - 1;
+  }
+  let end = lo;
+  while (end < tops.length && tops[end] < scrollTop + height) end++;
+  return [Math.max(0, lo - extra), Math.min(tops.length, end + extra)];
+}
+
+// a chapter's heading in the list: "Chapter 3 — The Harbor"
+function findChapterLabel(chId) {
+  if (!chId || !book) return '';
+  if (chapterKind(chId) === 'unnumbered') return stickyChapterLabel(chId);
+  const title = ((book.chapterTitles || {})[chId] || '').trim();
+  return title ? chapterName(chId) + ' ' + headingDash() + ' ' + title : chapterName(chId);
+}
+const findTabLabel = () => (currentTab === 'notes' ? t('Notes') : currentTab === 'outline' ? t('Outline') : t('Darlings'));
+
+function findListEl() {
+  let el = $('#find-results');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'find-results';
+  el.hidden = true;
+  el.setAttribute('role', 'region');
+  el.setAttribute('aria-label', t('Find results'));
+  const head = document.createElement('div');
+  head.className = 'fr-head';
+  const sum = document.createElement('span');
+  sum.className = 'fr-sum';
+  const dock = document.createElement('button');
+  dock.className = 'fr-dock';
+  dock.onclick = () => dockFindList(!findDocked());
+  const close = document.createElement('button');
+  close.className = 'fr-close';
+  close.textContent = '✕';
+  close.title = t('Hide the list');
+  close.setAttribute('aria-label', close.title);
+  close.onclick = () => { toggleFindList(false); $('#search-input').focus(); };
+  head.append(sum, dock, close);
+  const note = document.createElement('div');
+  note.className = 'fr-note';
+  note.hidden = true;
+  const empty = document.createElement('div');
+  empty.className = 'fr-empty';
+  empty.hidden = true;
+  const sc = document.createElement('div');
+  sc.className = 'fr-scroll';
+  sc.tabIndex = 0;
+  sc.setAttribute('role', 'listbox');
+  sc.setAttribute('aria-label', t('Find results'));
+  const space = document.createElement('div');
+  space.className = 'fr-space';
+  sc.append(space);
+  el.append(head, note, empty, sc);
+  let drawing = 0;
+  sc.addEventListener('scroll', () => {
+    if (drawing) return;
+    drawing = requestAnimationFrame(() => { drawing = 0; drawFindList(); });
+  });
+  // a click goes to the hit, like ↑ ↓ in the bar
+  sc.addEventListener('click', (e) => {
+    const act = e.target.closest('.fr-acts button');
+    if (act) { e.stopPropagation(); findDecide(+act.closest('[id^="fr-row-"]').id.slice(7), act.dataset.how); return; }
+    const row = e.target.closest('.fr-hit');
+    if (row) findListGo(+row.dataset.k);
+  });
+  // a button pressed keeps the focus in the list, where the keys are
+  sc.addEventListener('mousedown', (e) => { if (e.target.closest('.fr-acts button')) e.preventDefault(); });
+  // focus arriving from Tab lands on the hit last gone to. (Not from a
+  // press: redrawing the lines under the pointer then would lose the
+  // click, which goes where it was pressed.)
+  sc.addEventListener('pointerdown', () => { findList.pressing = true; });
+  window.addEventListener('pointerup', () => { setTimeout(() => { findList.pressing = false; }, 0); }, true);
+  sc.addEventListener('focus', () => {
+    if (findList.pressing) return;
+    if (findList.cursor < 0) findListPlace(findList.rowOf[searchState.idx] ?? findListStep(-1, 1));
+  });
+  sc.addEventListener('keydown', findListKeys);
+  $('#searchbar').append(el);
+  return el;
+}
+
+// The List button: the list opens where it was last, or goes away (a
+// docked list gives the right-hand pane back as it was)
+function toggleFindList(on = !findList.open) {
+  findList.open = on;
+  $('#search-list').setAttribute('aria-pressed', String(on));
+  placeFindList();
+  if (!on) return;
+  freshSearchIfStale();
+  renderFindList();
+  findListFollow();
+}
+function dockFindList(on) {
+  library.findDock = on;
+  writeLibrary(library);
+  placeFindList();
+  renderFindList();
+  findListFollow();
+  $('#find-results .fr-scroll').focus({ preventScroll: true });
+}
+// Below the bar, or docked: in the right-hand pane, over the notes, kept
+// open while it's there and the page moved over as if the pane were
+// pinned. Undocking puts the pane back the way the writer had it.
+function placeFindList() {
+  const el = findListEl();
+  const pane = $('#side-pane');
+  const view = $('#editor-view');
+  const dock = findList.open && findDocked();
+  if (dock && el.parentElement !== pane) {
+    findList.sideWas = { pinned: pane.dataset.pinned === '1' };
+    pane.dataset.pinned = '1';
+    pane.classList.add('open', 'find-docked');
+    view.classList.add('side-pinned', 'find-docked');
+    pane.append(el);
+  } else if (!dock && el.parentElement === pane) {
+    $('#searchbar').append(el);
+    const was = findList.sideWas || { pinned: false };
+    findList.sideWas = null;
+    pane.classList.remove('find-docked');
+    view.classList.remove('find-docked');
+    pane.dataset.pinned = was.pinned ? '1' : '0';
+    view.classList.toggle('side-pinned', was.pinned);
+    // (on Darlings the pane holds the snapshots, and stays open)
+    pane.classList.toggle('open', was.pinned || pane.matches(':hover') || view.classList.contains('darlings-tab'));
+  }
+  el.hidden = !findList.open;
+  el.classList.toggle('docked', dock);
+  const b = el.querySelector('.fr-dock');
+  b.hidden = NO_HOVER;
+  b.textContent = dock ? t('Undock') : t('Dock');
+  b.title = dock ? t('Put the list back under the find bar') : t('Keep the list in the right-hand pane');
+  b.setAttribute('aria-label', b.title);
+}
+
+// The rows for the matches Find has now. A new search starts the list at
+// the top; the same search found again (after a replace, or an edit on
+// the page) keeps it where it was.
+function renderFindList() {
+  if (!findList.open) return;
+  const el = findListEl();
+  const ms = searchState.matches;
+  const hitH = el.classList.contains('docked') ? FIND_ROW_H.hitDocked : FIND_ROW_H.hit;
+  const rows = findRows(ms, currentTab === 'manuscript');
+  const tops = [];
+  const rowOf = new Array(ms.length).fill(-1);
+  let y = 0;
+  rows.forEach((r, k) => {
+    tops.push(y);
+    if (r.head) y += FIND_ROW_H.head;
+    else { rowOf[r.i] = k; y += hitH; }
+  });
+  Object.assign(findList, { rows, tops, total: y, rowOf, hitH });
+  const sc = el.querySelector('.fr-scroll');
+  const key = [searchState.query, searchState.tab, searchState.opts].join('\n');
+  if (key !== findList.key) { findList.key = key; findList.cursor = -1; sc.scrollTop = 0; }
+  if (!rows[findList.cursor] || rows[findList.cursor].head) findList.cursor = -1;
+  el.querySelector('.fr-space').style.height = y + 'px';
+  el.querySelector('.fr-sum').textContent = ms.length ? t('{n} found', { n: ms.length }) : '';
+  const empty = el.querySelector('.fr-empty');
+  empty.textContent = searchState.query ? t('No matches') : t('Type what to find.');
+  empty.hidden = ms.length > 0;
+  sc.hidden = !ms.length;
+  // docked over Notes & Comments while in the Notes tab: say which notes
+  const note = el.querySelector('.fr-note');
+  note.hidden = !(el.classList.contains('docked') && currentTab === 'notes');
+  note.textContent = t('Finding in the Notes tab, not in Notes & Comments.');
+  drawFindList();
+}
+
+// Only the rows in view (and a few either side) are in the page
+function drawFindList() {
+  const el = $('#find-results');
+  if (!el || el.hidden) return;
+  const sc = el.querySelector('.fr-scroll');
+  const space = el.querySelector('.fr-space');
+  const [from, to] = findWindow(findList.tops, sc.scrollTop, sc.clientHeight || 600);
+  const frag = document.createDocumentFragment();
+  for (let k = from; k < to; k++) frag.append(findRowEl(k));
+  space.replaceChildren(frag);
+  const cur = findList.cursor;
+  if (cur >= from && cur < to) sc.setAttribute('aria-activedescendant', 'fr-row-' + cur);
+  else sc.removeAttribute('aria-activedescendant');
+}
+
+function findRowEl(k) {
+  const r = findList.rows[k];
+  const d = document.createElement('div');
+  d.style.top = findList.tops[k] + 'px';
+  d.id = 'fr-row-' + k;
+  if (r.head) {
+    d.className = 'fr-group' + (r.head === 'crosses' ? ' fr-crosses' : '');
+    d.setAttribute('role', 'presentation');
+    const name = document.createElement('span');
+    name.className = 'fr-gname';
+    name.textContent = r.head === 'crosses' ? t('Mixed formatting') : r.head === 'chapter' ? findChapterLabel(r.chId) : findTabLabel();
+    const n = document.createElement('span');
+    n.className = 'fr-gn';
+    n.textContent = String(r.n);
+    d.append(name, n);
+    if (r.head === 'crosses' && currentTab === 'manuscript') d.append(findActs(true));
+    return d;
+  }
+  const m = searchState.matches[r.i];
+  d.className = 'fr-hit' + (r.cross ? ' fr-cross' : '') + (r.i === searchState.idx ? ' at' : '') + (k === findList.cursor ? ' cur' : '');
+  d.style.height = findList.hitH + 'px';
+  d.dataset.k = k;
+  d.setAttribute('role', 'option');
+  d.setAttribute('aria-selected', String(k === findList.cursor));
+  const line = document.createElement('span');
+  line.className = 'fr-line';
+  // a hit that crosses formatting says which chapter (its group doesn't);
+  // a title's hit says it's the title
+  const where = r.cross ? chapterName(m.chId) : m.title ? t('Title') : '';
+  if (where) {
+    const tag = document.createElement('span');
+    tag.className = 'fr-tag';
+    tag.textContent = where;
+    line.append(tag);
+  }
+  findLineInto(line, m, r.cross);
+  d.append(line);
+  if (r.cross && currentTab === 'manuscript') d.append(findActs(false));
+  return d;
+}
+// Keep formatting / Plain, on a hit that crosses formatting (K, P) or on
+// its heading for all of them (⇧K, ⇧P). Shown on hover and on the line
+// the keyboard is on.
+function findActs(all) {
+  const box = document.createElement('span');
+  box.className = 'fr-acts';
+  for (const [how, label, tip] of [
+    ['keep', t('Keep formatting'), all ? t('Replace them all, each new word in the formatting of the word it replaces (⇧K)') : t('Each new word takes the formatting of the word it replaces (K)')],
+    ['plain', t('Plain'), all ? t('Replace them all without bold, italic, underline or strikethrough (⇧P)') : t('No bold, italic, underline or strikethrough (P)')]
+  ]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.tabIndex = -1;
+    b.dataset.how = how;
+    b.textContent = label;
+    b.title = tip;
+    box.append(b);
+  }
+  return box;
+}
+
+// A hit's line of context, the hit in bold. One that crosses formatting
+// shows the formatting (the italic word in italics) and marks the hit.
+function findLineInto(line, m, formatted) {
+  const { text, nodes, root } = m.block;
+  const c = findContext(text, m.start, m.end);
+  const clean = (x) => x.replace(/\s+/g, ' ');
+  if (c.before) line.append('…');
+  if (!formatted) {
+    const b = document.createElement('b');
+    b.textContent = clean(text.slice(m.start, m.end));
+    line.append(clean(text.slice(c.a, m.start)), b, clean(text.slice(m.end, c.z)));
+  } else {
+    nodes.forEach(({ node, at }, x) => {
+      const ns = Math.max(at, c.a);
+      const ne = Math.min(x + 1 < nodes.length ? nodes[x + 1].at : text.length, c.z);
+      if (ne <= ns) return;
+      const style = findStyleOf(node, root);
+      const cuts = [ns, ...[m.start, m.end].filter((p) => p > ns && p < ne), ne];
+      for (let p = 0; p + 1 < cuts.length; p++) {
+        let piece = document.createTextNode(clean(text.slice(cuts[p], cuts[p + 1])));
+        for (const tag of style) { const w = document.createElement(tag); w.append(piece); piece = w; }
+        if (cuts[p] >= m.start && cuts[p + 1] <= m.end) { const mk = document.createElement('mark'); mk.append(piece); piece = mk; }
+        line.append(piece);
+      }
+    });
+  }
+  if (c.after) line.append('…');
+}
+
+// Going to a hit from the list: the same as ↑ ↓ in the bar
+function findListGo(k) {
+  const r = findList.rows[k];
+  if (!r || r.head) return;
+  findList.cursor = k;
+  gotoMatch(r.i);
+}
+// The list keeps up with the bar: the hit gone to is marked, and
+// scrolled into view with its chapter's heading
+function findListFollow() {
+  if (!findList.open) return;
+  const k = findList.rowOf[searchState.idx];
+  if (k == null || k < 0) { drawFindList(); return; }
+  findListPlace(k);
+}
+function findListPlace(k) {
+  const sc = $('#find-results .fr-scroll');
+  if (!sc || k == null || k < 0 || !findList.rows[k]) return;
+  findList.cursor = k;
+  const top = findList.tops[k] - (k > 0 && findList.rows[k - 1].head ? FIND_ROW_H.head : 0);
+  const bottom = findList.tops[k] + findList.hitH;
+  if (top < sc.scrollTop) sc.scrollTop = top;
+  else if (bottom > sc.scrollTop + sc.clientHeight) sc.scrollTop = bottom - sc.clientHeight;
+  drawFindList();
+}
+// the next hit row from k, n hits along (heads skipped); the last one there is
+function findListStep(k, n) {
+  const rows = findList.rows;
+  const dir = n < 0 ? -1 : 1;
+  let at = -1;
+  for (let j = k + dir, left = Math.abs(n); j >= 0 && j < rows.length && left > 0; j += dir) {
+    if (rows[j].head) continue;
+    at = j;
+    left--;
+  }
+  return at < 0 ? (k >= 0 && rows[k] && !rows[k].head ? k : -1) : at;
+}
+function findListFocus() {
+  const sc = findListEl().querySelector('.fr-scroll');
+  findListPlace(findList.rowOf[searchState.idx] >= 0 ? findList.rowOf[searchState.idx] : findListStep(-1, 1));
+  sc.focus({ preventScroll: true });
+}
+// In the list: ↑ ↓ move, Page Up/Down a screen, Home End, Enter goes,
+// Esc back to the Find box
+function findListKeys(e) {
+  if (e.altKey || e.metaKey || e.ctrlKey) return;
+  // K / P decide the hit the keyboard is on, if it crosses formatting;
+  // with Shift, every one that does
+  const how = e.code === 'KeyK' ? 'keep' : e.code === 'KeyP' ? 'plain' : null;
+  if (how && currentTab === 'manuscript') {
+    const r = findList.rows[findList.cursor];
+    const head = findList.rows.findIndex((x) => x.head === 'crosses');
+    if (e.shiftKey ? head >= 0 : r && r.cross) { e.preventDefault(); findDecide(e.shiftKey ? head : findList.cursor, how); }
+    return;
+  }
+  const sc = e.currentTarget;
+  const page = Math.max(1, Math.floor(sc.clientHeight / findList.hitH) - 1);
+  const k = findList.cursor;
+  let to = null;
+  if (e.key === 'ArrowDown') to = findListStep(k, 1);
+  else if (e.key === 'ArrowUp') to = k < 0 ? findListStep(-1, 1) : findListStep(k, -1);
+  else if (e.key === 'PageDown') to = findListStep(k, page);
+  else if (e.key === 'PageUp') to = findListStep(k, -page);
+  else if (e.key === 'Home') to = findListStep(-1, 1);
+  else if (e.key === 'End') to = findListStep(findList.rows.length, -1);
+  else if (e.key === 'Enter') { e.preventDefault(); findListGo(k < 0 ? findListStep(-1, 1) : k); return; }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); $('#search-input').focus(); return; }
+  else return;
+  e.preventDefault();
+  if (to >= 0) findListPlace(to);
+}
+
+// Find again after the page changed, keeping the place: the hit last gone
+// to (if it's still there) and the list where it was
+function refreshFindKeepingPlace() {
+  if ($('#searchbar').hidden) return;
+  const old = searchState.idx >= 0 && searchState.matches[searchState.idx];
+  runSearch();
+  if (!old || !old.range.startContainer.isConnected) return;
+  const i = searchState.matches.findIndex((m) => {
+    try { return m.range.compareBoundaryPoints(Range.START_TO_START, old.range) === 0; } catch { return false; }
+  });
+  if (i < 0) return;
+  searchState.idx = i;
+  paintHighlights();
+  $('#search-count').textContent = t('{i} of {n}', { i: i + 1, n: searchState.matches.length });
+  if (findList.open) { findList.cursor = findList.rowOf[i]; drawFindList(); }
 }
 
 $('#search-input').addEventListener('input', () => {
+  findShowClears();
   clearTimeout(saveTimers.search);
   saveTimers.search = setTimeout(runSearch, 250);
 });
 $('#search-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); freshSearchIfStale(); gotoMatch(searchState.idx + (e.shiftKey ? -1 : 1)); }
+  // ↓ goes into the list, when it's up
+  if (e.key === 'ArrowDown' && findList.open && !e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+    freshSearchIfStale();
+    if (searchState.matches.length) { e.preventDefault(); findListFocus(); }
+  }
   if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); returnFromSearch(); }
   if (e.key === 'Tab' && !e.shiftKey) {
-    const m = searchState.matches[Math.max(0, searchState.idx)];
+    const m = findTabHit();
     if (m) {
       e.preventDefault();
       const sel = window.getSelection();
@@ -12846,6 +13605,32 @@ $('#search-input').addEventListener('keydown', (e) => {
     }
   }
 });
+// Tab in the Find box, with a hit there, puts the caret after it on the
+// page (above). Anywhere else in the bar (and its list, docked or not),
+// Tab and Shift+Tab go round the bar rather than into the book.
+const findTabHit = () => searchState.matches[Math.max(0, searchState.idx)];
+const findTabStops = () => [...$('#searchbar').querySelectorAll('input, button'), ...(findList.open ? [...$('#find-results').querySelectorAll('button, .fr-scroll')] : [])]
+  .filter((el, i, all) => all.indexOf(el) === i && el.tabIndex >= 0 && !el.disabled && !el.hidden && !el.closest('[hidden]') && el.offsetParent !== null && !el.closest('.fr-acts'));
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab' || e.ctrlKey || e.metaKey || e.altKey || $('#searchbar').hidden) return;
+  const at = document.activeElement;
+  if (!at || !(at.closest('#searchbar') || at.closest('#find-results'))) return;
+  if (at.id === 'search-input' && !e.shiftKey && findTabHit()) return;
+  const stops = findTabStops();
+  if (!stops.length) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const i = stops.indexOf(at);
+  stops[(i + (e.shiftKey ? -1 : 1) + stops.length) % stops.length].focus();
+}, true);
+// the ✕ in each box: shown while it has something in it, empties it
+function findShowClears() {
+  $('#search-clear').hidden = !$('#search-input').value;
+  $('#replace-clear').hidden = !$('#replace-input').value;
+}
+$('#replace-input').addEventListener('input', findShowClears);
+$('#search-clear').onclick = () => { $('#search-input').value = ''; findShowClears(); runSearch(); $('#search-input').focus(); };
+$('#replace-clear').onclick = () => { $('#replace-input').value = ''; findShowClears(); $('#replace-input').focus(); };
 $('#replace-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); replaceCurrent(); }
   if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); returnFromSearch(); }
@@ -12855,6 +13640,17 @@ $('#search-prev').onclick = () => { freshSearchIfStale(); gotoMatch(searchState.
 $('#replace-one').onclick = replaceCurrent;
 $('#replace-all').onclick = replaceAllMatches;
 $('#search-close').onclick = closeSearch;
+$('#find-case').onclick = () => toggleFindOpt('findCase');
+$('#find-word').onclick = () => toggleFindOpt('findWord');
+$('#find-titles').onclick = () => toggleFindOpt('findTitles');
+$('#search-list').onclick = () => toggleFindList();
+// the page changed under an open list: look again in a moment, keeping
+// the place (the hit last gone to, and where the list was scrolled)
+$('#paper-scroll').addEventListener('input', () => {
+  if (!findList.open || $('#searchbar').hidden) return;
+  clearTimeout(saveTimers.findList);
+  saveTimers.findList = setTimeout(refreshFindKeepingPlace, 700);
+});
 
 /* ================================================================== */
 /*  IMPORT                                                             */
@@ -16186,6 +16982,8 @@ for (const id of ['#author-chip', '#goal-counter', '#word-counter', '#pos-counte
 document.addEventListener('mouseup', () => {
   const el = document.activeElement;
   if (!el || el === document.body || el.matches(':focus-visible') || el.closest('.modal-backdrop')) return;
+  // (Find's list docked in the pane keeps it: its keys, Esc back to the Find box, work after a click)
+  if (el.closest('#find-results')) return;
   if (el.closest('#bottombar, #nav-pane, #side-pane, #shelf-header, #shelves')) el.blur();
 }, true);
 
@@ -16293,7 +17091,7 @@ const REGIONS = [
   },
   {
     box: () => $('#side-pane'),
-    enter: () => openPaneFromKeyboard($('#side-pane'), $('#sticky-list textarea') || $('#side-pin'))
+    enter: () => openPaneFromKeyboard($('#side-pane'), $('#side-pane .fr-scroll') || $('#sticky-list textarea') || $('#side-pin'))
   },
   { box: () => $('#bottombar'), enter: () => ($('.tab.active') || $('#back-to-shelf')).focus() }
 ];
