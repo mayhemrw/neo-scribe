@@ -70,6 +70,11 @@ contextBridge.exposeInMainWorld('neo', {
   paper: ipcRenderer.sendSync('paper:get'), // 'Letter' or 'A4', from the computer's region
   reloadForLanguage: () => ipcRenderer.invoke('i18n:reload'),
 
+  // the command palette: the menu's commands, and one of them clicked
+  // (main.js; Pocket has no menu, so no palette)
+  paletteItems: () => ipcRenderer.invoke('palette:items'),
+  paletteRun: (key, label, path) => ipcRenderer.invoke('palette:run', key, label, path),
+
   writingStyleState: (st) => ipcRenderer.send('style:state', st),
   viewState: (st) => ipcRenderer.send('view:state', st),
   onMenu: (cb) => ipcRenderer.on('menu', (_e, msg) => cb(msg))

@@ -12857,6 +12857,190 @@ $('#replace-all').onclick = replaceAllMatches;
 $('#search-close').onclick = closeSearch;
 
 /* ================================================================== */
+/*  COMMAND PALETTE — ⌘K (Ctrl+K)                                      */
+/* ================================================================== */
+
+// View → Command Palette…: every command in NEO's menus by name, with
+// where it lives and its shortcut, greyed when the menu has it greyed.
+// main.js walks the menu as it stands (palette:items) and clicks the
+// chosen item itself (palette:run), so the palette can never disagree
+// with the menus: a script's Format menu, the interface language, a new
+// feature's menu item all come along on their own. Nothing is on the page
+// until it's called. Desktop only: Pocket's bridge has no menu.
+
+// a string's words without accents, in lower case: "Café au lait" → cafe, au, lait
+const paletteFold = (s) => String(s || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+const paletteWords = (s) => paletteFold(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+// a command's name with its place, as recent commands are remembered
+const paletteId = (x) => [...(x.path || []), x.label].join(' › ');
+
+// How well a command answers what's typed: each typed word starts a word
+// of its name (best), starts a word of where it lives, or is found
+// anywhere in either; null when a word isn't found at all. Lower is
+// better: words out of order, and a name matched further in, count a
+// little against it.
+function paletteScore(item, q) {
+  const want = paletteWords(q);
+  if (!want.length) return 0;
+  const name = paletteWords(item.label);
+  // the whole name typed: that one first ("paper" is the page, before Paperback for KDP…)
+  if (want.join(' ') === name.join(' ')) return -1;
+  const where = paletteWords((item.path || []).join(' '));
+  const all = paletteFold(item.label + ' ' + (item.path || []).join(' '));
+  let score = 0;
+  let last = -1;
+  for (const w of want) {
+    const i = name.findIndex((x, k) => k > last && x.startsWith(w));
+    const j = i >= 0 ? i : name.findIndex((x) => x.startsWith(w));
+    if (j >= 0) {
+      if (j < last) score += 1;
+      if (last < 0) score += j * 0.1;
+      last = Math.max(last, j);
+    } else if (where.some((x) => x.startsWith(w))) score += 2;
+    else if (all.includes(w)) score += 5;
+    else return null;
+  }
+  return score;
+}
+// The commands for what's typed, best first (the menu's order between
+// equals, those that can't be used now after those that can). With
+// nothing typed: the last ones used first (recent: their ids, newest
+// first), then the rest in the menu's order.
+function paletteFilter(items, q, recent = []) {
+  if (!paletteWords(q).length) {
+    const first = recent.map((r) => items.find((x) => paletteId(x) === r)).filter(Boolean);
+    return [...first, ...items.filter((x) => !first.includes(x))];
+  }
+  return items.map((x, i) => ({ x, i, s: paletteScore(x, q) })).filter((o) => o.s !== null)
+    .sort((a, b) => a.s - b.s || (a.x.enabled === false) - (b.x.enabled === false) || a.i - b.i)
+    .map((o) => o.x);
+}
+// the last few used, on this computer
+const PALETTE_RECENT = 'neo-palette-recent';
+const PALETTE_RECENT_MAX = 5;
+function paletteRecent() {
+  try { const r = JSON.parse(localStorage.getItem(PALETTE_RECENT) || '[]'); return Array.isArray(r) ? r.filter((x) => typeof x === 'string').slice(0, PALETTE_RECENT_MAX) : []; } catch { return []; }
+}
+function paletteRemember(x) {
+  try {
+    const id = paletteId(x);
+    localStorage.setItem(PALETTE_RECENT, JSON.stringify([id, ...paletteRecent().filter((r) => r !== id)].slice(0, PALETTE_RECENT_MAX)));
+  } catch { /* fine: it just won't be remembered */ }
+}
+
+// ⌘K again while it's up closes it; it never opens over another dialog
+async function togglePalette() {
+  const open = $('#command-palette');
+  if (open) { open.paletteClose(); return; }
+  if (document.querySelector('.modal-backdrop:not([hidden])')) return;
+  await showPalette();
+}
+async function showPalette() {
+  const neo = window.neo;
+  if (!neo || !neo.paletteItems || $('#command-palette')) return;
+  const previousFocus = document.activeElement;
+  const selection = window.getSelection();
+  const previousRange = previousFocus && previousFocus.isContentEditable && selection.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+  let items = [];
+  try { items = (await neo.paletteItems()) || []; } catch (err) { neo.logError('palette: ' + ((err && err.message) || err)); }
+  if ($('#command-palette') || document.querySelector('.modal-backdrop:not([hidden])')) return;
+  // a translation's quotation marks can't end an attribute
+  const attr = (s) => escHtml(s).replace(/"/g, '&quot;');
+  const bd = document.createElement('div');
+  bd.id = 'command-palette';
+  bd.className = 'modal-backdrop palette-backdrop';
+  bd.innerHTML = `
+    <div class="modal palette-modal" role="dialog" aria-modal="true" aria-label="${attr(t('Command Palette'))}">
+      <input class="pal-input" type="text" spellcheck="false" autocomplete="off" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="pal-list"
+        placeholder="${attr(t('Type a command'))}" aria-label="${attr(t('Type a command'))}" />
+      <div id="pal-list" class="pal-list" role="listbox" aria-label="${attr(t('Commands'))}"></div>
+      <p class="pal-empty" hidden>${escHtml(t('No command by that name.'))}</p>
+    </div>`;
+  const input = bd.querySelector('.pal-input');
+  const list = bd.querySelector('.pal-list');
+  const empty = bd.querySelector('.pal-empty');
+  const st = { shown: [], cur: 0 };
+  const recent = paletteRecent();
+
+  const close = (restore = true) => {
+    document.removeEventListener('keydown', onKey, true);
+    bd.remove();
+    if (!restore) return;
+    if (previousFocus && previousFocus.isConnected && previousFocus !== document.body) previousFocus.focus({ preventScroll: true });
+    if (previousRange && previousRange.startContainer.isConnected && previousRange.endContainer.isConnected) {
+      selection.removeAllRanges();
+      selection.addRange(previousRange);
+    }
+  };
+  bd.paletteClose = close;
+  const draw = () => {
+    const q = input.value;
+    st.shown = paletteFilter(items, q, recent);
+    const recentN = paletteWords(q).length ? 0 : st.shown.filter((x) => recent.includes(paletteId(x))).length;
+    st.cur = Math.min(st.cur, Math.max(0, st.shown.length - 1));
+    list.innerHTML = st.shown.map((x, i) => `
+      <div class="pal-item${x.enabled === false ? ' off' : ''}${i === recentN - 1 ? ' pal-last-recent' : ''}" role="option" id="pal-i-${i}" data-i="${i}"
+        aria-selected="${i === st.cur}"${x.enabled === false ? ' aria-disabled="true"' : ''}>
+        <span class="pal-check" aria-hidden="true">${x.checked ? '✓' : ''}</span>
+        <span class="pal-name">${escHtml(x.label)}${x.path && x.path.length ? `<span class="pal-path">${escHtml(x.path.join(' › '))}</span>` : ''}</span>
+        ${x.shortcut ? `<kbd class="pal-key">${escHtml(x.shortcut)}</kbd>` : ''}
+      </div>`).join('');
+    empty.hidden = st.shown.length > 0;
+    list.hidden = !st.shown.length;
+    mark();
+  };
+  const mark = () => {
+    list.querySelectorAll('.pal-item').forEach((el) => el.setAttribute('aria-selected', String(+el.dataset.i === st.cur)));
+    const el = list.querySelector(`#pal-i-${st.cur}`);
+    if (el) { el.scrollIntoView({ block: 'nearest' }); input.setAttribute('aria-activedescendant', el.id); } else input.removeAttribute('aria-activedescendant');
+  };
+  const move = (to) => {
+    if (!st.shown.length) return;
+    st.cur = Math.max(0, Math.min(st.shown.length - 1, to));
+    mark();
+  };
+  // The command runs once the palette is gone and the page has its caret
+  // back, so Copy, Paste and Undo act where the writer was
+  const run = async (i) => {
+    const x = st.shown[i];
+    if (!x) return;
+    if (x.enabled === false) { toast(t('“{name}” can’t be used right now.', { name: x.label }), 3000); return; }
+    paletteRemember(x);
+    close(true);
+    let ok = false;
+    try { ok = await neo.paletteRun(x.key, x.label, x.path || []); } catch { ok = false; }
+    if (!ok) toast(t('“{name}” can’t be used right now.', { name: x.label }), 3000);
+  };
+  // it owns the keyboard while it's the topmost dialog
+  const onKey = (e) => {
+    const top = [...document.querySelectorAll('.modal-backdrop:not([hidden])')].pop();
+    if (top !== bd) return;
+    e.stopPropagation();
+    if (e.isComposing || e.keyCode === 229) return;
+    const page = Math.max(1, Math.floor(list.clientHeight / 38) - 1);
+    if (e.key === 'Escape') { e.preventDefault(); close(true); }
+    else if (e.key === 'Tab') e.preventDefault(); // the box keeps the keys
+    else if (e.key === 'ArrowDown') { e.preventDefault(); move(st.cur + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); move(st.cur - 1); }
+    else if (e.key === 'PageDown') { e.preventDefault(); move(st.cur + page); }
+    else if (e.key === 'PageUp') { e.preventDefault(); move(st.cur - page); }
+    else if (e.key === 'Enter') { e.preventDefault(); run(st.cur); }
+    if (bd.isConnected && document.activeElement !== input) input.focus();
+  };
+  document.addEventListener('keydown', onKey, true);
+  input.addEventListener('input', () => { st.cur = 0; draw(); list.scrollTop = 0; });
+  list.addEventListener('mousedown', (e) => e.preventDefault()); // the box keeps the focus
+  list.addEventListener('click', (e) => {
+    const el = e.target.closest('.pal-item');
+    if (el) run(+el.dataset.i);
+  });
+  bd.addEventListener('mousedown', (e) => { if (e.target === bd) { e.preventDefault(); close(true); } });
+  document.body.appendChild(bd);
+  draw();
+  input.focus();
+}
+
+/* ================================================================== */
 /*  IMPORT                                                             */
 /* ================================================================== */
 
@@ -14070,7 +14254,9 @@ function bookShortcutSections() {
       [K('⌘S', 'Ctrl+S'), tk('Take a snapshot of the book'), tk('NEO saves as you type; a snapshot keeps the book as it stands now. They’re on the Darlings tab.')],
       [K('⌘,', 'Ctrl+,'), tk('Goals and writing sprints')],
       [K('⌘⇧I', 'Ctrl+Shift+I'), tk('Import manuscripts')],
-      [K('⌘E', 'Ctrl+E'), tk('Email a draft to yourself')]
+      [K('⌘E', 'Ctrl+E'), tk('Email a draft to yourself')],
+      // every menu command by name (desktop only: Pocket has no menu)
+      ...(window.neo && window.neo.paletteItems ? [[K('⌘K', 'Ctrl+K'), tk('Command palette'), tk('Every menu command by name, with its shortcut.')]] : [])
     ] },
     { title: tk('View & window'), rows: [
       [[K('⌘⇧F', 'Ctrl+Shift+F'), K('⌘Enter', 'Ctrl+Enter')], tk('Toggle full screen')],
@@ -15993,6 +16179,7 @@ window.neo.onMenu(async (msg) => {
   // (styles.css); the window says when it goes in and out, whatever is open
   if (msg.type === 'fullScreen') { document.body.classList.toggle('full-screen', !!msg.value); return; }
   if ($('#keyboard-shortcuts') && msg.type !== 'help') return;
+  if (msg.type === 'palette') { await togglePalette(); return; }
   // a window the menu opens (⌘, for Goals, say) never stacks on one that's
   // already open: pressing it again used to pile up overlays
   const WINDOWS = ['stats', 'about', 'emailSettings', 'coverArt', 'reshelve', 'checkUpdate'];
