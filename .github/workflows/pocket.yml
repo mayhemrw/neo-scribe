@@ -1,8 +1,8 @@
 # Builds the NEO Pocket Android APK, signed with one stable key so every
 # build installs straight over the previous one — no uninstalling.
 #
-# Runs on every push to main that touches Pocket (or the desktop files it
-# borrows), on pocket-v* tags, and by hand from the Actions tab.
+# In NEO Scribe it runs only by hand from the Actions tab (Hugh's NEO runs
+# it on every push to main that touches Pocket, and on pocket-v* tags).
 #
 #   push to main  -> refreshes the rolling "pocket-latest" pre-release; the
 #                    APK link stays the same forever, so bookmark it on the phone
@@ -17,21 +17,9 @@
 name: Build NEO Pocket
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'pocket/**'
-      - 'app.js'
-      - 'covers.js'
-      - 'styles.css'
-      - 'fonts/**'
-      - 'i18n.js'
-      - 'locales/**'
-      - 'main.js'
-      - 'scripts/pocket-www.js'
-      - '.github/workflows/pocket.yml'
-    tags:
-      - 'pocket-v*'
+  # NEO Scribe: by hand only (Actions -> Build NEO Pocket -> Run workflow).
+  # Pocket still has Hugh's app ids and library folder and no Scribe's Log,
+  # so it isn't built or put on the Releases page by itself (Roadmap).
   workflow_dispatch: {}
 
 permissions:
